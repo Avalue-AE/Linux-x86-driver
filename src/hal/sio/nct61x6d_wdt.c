@@ -83,17 +83,24 @@ void hal_wdt_stop(void)
 	nct61x6d_dev.ops->exit();
 }
 
-void hal_wdt_write(u8 time)
+u16 hal_wdt_max_timeout(void)
 {
-	nct61x6d_dev.ops->enter();
-	nct61x6d_dev.ops->select(NCT61X6D_LD_WDT);
-	nct61x6d_dev.ops->write8(NCT61X6D_WDT_REG_TIMEOUT, time);
-	nct61x6d_dev.ops->exit();
-
-	log_debug("Writing NCT61x6D WDT timeout value: %u\n", time);
+	return 0xFF;
 }
 
-u8 hal_wdt_read(void)
+void hal_wdt_write(u16 time)
+{
+	u8 timeout = (u8)time;
+
+	nct61x6d_dev.ops->enter();
+	nct61x6d_dev.ops->select(NCT61X6D_LD_WDT);
+	nct61x6d_dev.ops->write8(NCT61X6D_WDT_REG_TIMEOUT, timeout);
+	nct61x6d_dev.ops->exit();
+
+	log_debug("Writing NCT61x6D WDT timeout value: %u\n", timeout);
+}
+
+u16 hal_wdt_read(void)
 {
 	u8 time;
 

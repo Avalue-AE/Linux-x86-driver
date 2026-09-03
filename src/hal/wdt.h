@@ -32,15 +32,21 @@ extern void hal_wdt_start(void);
 extern void hal_wdt_stop(void);
 
 /**
+ * Get the maximum timeout supported by the hardware watchdog timer
+ * @return Maximum timeout value in seconds
+ */
+extern u16 hal_wdt_max_timeout(void);
+
+/**
  * Write the timeout value to the hardware watchdog timer
  * @time: Timeout value in seconds
  */
-extern void hal_wdt_write(u8 time);
+extern void hal_wdt_write(u16 time);
 
 /**
  * Read the current timeout value from the hardware watchdog timer
  * @return Current timeout value in seconds
  */
-extern u8 hal_wdt_read(void);
+extern u16 hal_wdt_read(void);
 
 #endif /** __HAL_WDT_H__ */

@@ -159,6 +159,24 @@ static ssize_t __hwm_sensor_register_store(struct device *dev,
 	return count;
 }
 
+/*
+ * Sysfs attribute names follow the hwmon core's own channel numbering, so a
+ * file in one of the subdirectory groups below names the same channel as the
+ * core-created file of that name at the top level: the core numbers temp, fan
+ * and pwm attributes from 1, and voltages from 0. The `.conf` index each
+ * attribute carries is the driver's own and always starts at 0, so for those
+ * three types the file number is one higher than the index beside it -- the
+ * `// ===== <Type> N =====` headers below name the `.conf` index, matching the
+ * CONFIG_HWM_*_N_ENABLE guard, not the file.
+ *
+ * These groups have to agree with the core's numbering because both layouts
+ * are registered on any kernel that has HWMON_CHANNEL_INFO, so pwm/pwm1 and
+ * pwm1 are two writable files one directory apart. When they disagreed, a
+ * write to the standard pwm1 reached the channel pwm/pwm1 described -- on a
+ * board whose first PWM is the panel backlight, setting a fan duty dimmed the
+ * display instead. Keep the two layouts numbered alike when adding a channel.
+ */
+
 /**
  * Fixed sensor device attribute for voltage
  * The Max number of voltage sensors is 8
@@ -291,45 +309,45 @@ static struct attribute_group __hwm_in_group = {
 
 // ===== Temperature 0 =====
 #if CONFIG_HWM_TEMPERATURE_0_ENABLE
-static SENSOR_DEVICE_ATTR_2(temp0_input, 0444, __hwm_sensor_register_show, NULL,
+static SENSOR_DEVICE_ATTR_2(temp1_input, 0444, __hwm_sensor_register_show, NULL,
 			    HWM_SENSOR_INDEX_TEMPERATURE, 0);
-static SENSOR_DEVICE_ATTR_2(temp0_label, 0444, __hwm_sensor_label_show, NULL,
+static SENSOR_DEVICE_ATTR_2(temp1_label, 0444, __hwm_sensor_label_show, NULL,
 			    HWM_SENSOR_INDEX_TEMPERATURE, 0);
 #endif
 
 // ===== Temperature 1 =====
 #if CONFIG_HWM_TEMPERATURE_1_ENABLE
-static SENSOR_DEVICE_ATTR_2(temp1_input, 0444, __hwm_sensor_register_show, NULL,
+static SENSOR_DEVICE_ATTR_2(temp2_input, 0444, __hwm_sensor_register_show, NULL,
 			    HWM_SENSOR_INDEX_TEMPERATURE, 1);
-static SENSOR_DEVICE_ATTR_2(temp1_label, 0444, __hwm_sensor_label_show, NULL,
+static SENSOR_DEVICE_ATTR_2(temp2_label, 0444, __hwm_sensor_label_show, NULL,
 			    HWM_SENSOR_INDEX_TEMPERATURE, 1);
 #endif
 
 // ===== Temperature 2 =====
 #if CONFIG_HWM_TEMPERATURE_2_ENABLE
-static SENSOR_DEVICE_ATTR_2(temp2_input, 0444, __hwm_sensor_register_show, NULL,
+static SENSOR_DEVICE_ATTR_2(temp3_input, 0444, __hwm_sensor_register_show, NULL,
 			    HWM_SENSOR_INDEX_TEMPERATURE, 2);
-static SENSOR_DEVICE_ATTR_2(temp2_label, 0444, __hwm_sensor_label_show, NULL,
+static SENSOR_DEVICE_ATTR_2(temp3_label, 0444, __hwm_sensor_label_show, NULL,
 			    HWM_SENSOR_INDEX_TEMPERATURE, 2);
 #endif
 
 static struct attribute *__hwm_temp_attrs[] = {
 // Temperature input 0
 #if CONFIG_HWM_TEMPERATURE_0_ENABLE
-	&sensor_dev_attr_temp0_input.dev_attr.attr,
-	&sensor_dev_attr_temp0_label.dev_attr.attr,
-#endif
-
-// Temperature input 1
-#if CONFIG_HWM_TEMPERATURE_1_ENABLE
 	&sensor_dev_attr_temp1_input.dev_attr.attr,
 	&sensor_dev_attr_temp1_label.dev_attr.attr,
 #endif
 
-// Temperature input 2
-#if CONFIG_HWM_TEMPERATURE_2_ENABLE
+// Temperature input 1
+#if CONFIG_HWM_TEMPERATURE_1_ENABLE
 	&sensor_dev_attr_temp2_input.dev_attr.attr,
 	&sensor_dev_attr_temp2_label.dev_attr.attr,
+#endif
+
+// Temperature input 2
+#if CONFIG_HWM_TEMPERATURE_2_ENABLE
+	&sensor_dev_attr_temp3_input.dev_attr.attr,
+	&sensor_dev_attr_temp3_label.dev_attr.attr,
 #endif
 	NULL,
 };
@@ -345,45 +363,45 @@ static struct attribute_group __hwm_temp_group = {
 
 // ===== Fan 0 =====
 #if CONFIG_HWM_FAN_0_ENABLE
-static SENSOR_DEVICE_ATTR_2(fan0_input, 0444, __hwm_sensor_register_show, NULL,
+static SENSOR_DEVICE_ATTR_2(fan1_input, 0444, __hwm_sensor_register_show, NULL,
 			    HWM_SENSOR_INDEX_FAN, 0);
-static SENSOR_DEVICE_ATTR_2(fan0_label, 0444, __hwm_sensor_label_show, NULL,
+static SENSOR_DEVICE_ATTR_2(fan1_label, 0444, __hwm_sensor_label_show, NULL,
 			    HWM_SENSOR_INDEX_FAN, 0);
 #endif
 
 // ===== Fan 1 =====
 #if CONFIG_HWM_FAN_1_ENABLE
-static SENSOR_DEVICE_ATTR_2(fan1_input, 0444, __hwm_sensor_register_show, NULL,
+static SENSOR_DEVICE_ATTR_2(fan2_input, 0444, __hwm_sensor_register_show, NULL,
 			    HWM_SENSOR_INDEX_FAN, 1);
-static SENSOR_DEVICE_ATTR_2(fan1_label, 0444, __hwm_sensor_label_show, NULL,
+static SENSOR_DEVICE_ATTR_2(fan2_label, 0444, __hwm_sensor_label_show, NULL,
 			    HWM_SENSOR_INDEX_FAN, 1);
 #endif
 
 // ===== Fan 2 =====
 #if CONFIG_HWM_FAN_2_ENABLE
-static SENSOR_DEVICE_ATTR_2(fan2_input, 0444, __hwm_sensor_register_show, NULL,
+static SENSOR_DEVICE_ATTR_2(fan3_input, 0444, __hwm_sensor_register_show, NULL,
 			    HWM_SENSOR_INDEX_FAN, 2);
-static SENSOR_DEVICE_ATTR_2(fan2_label, 0444, __hwm_sensor_label_show, NULL,
+static SENSOR_DEVICE_ATTR_2(fan3_label, 0444, __hwm_sensor_label_show, NULL,
 			    HWM_SENSOR_INDEX_FAN, 2);
 #endif
 
 static struct attribute *__hwm_fan_attrs[] = {
 // Fan input 0
 #if CONFIG_HWM_FAN_0_ENABLE
-	&sensor_dev_attr_fan0_input.dev_attr.attr,
-	&sensor_dev_attr_fan0_label.dev_attr.attr,
-#endif
-
-// Fan input 1
-#if CONFIG_HWM_FAN_1_ENABLE
 	&sensor_dev_attr_fan1_input.dev_attr.attr,
 	&sensor_dev_attr_fan1_label.dev_attr.attr,
 #endif
 
-// Fan input 2
-#if CONFIG_HWM_FAN_2_ENABLE
+// Fan input 1
+#if CONFIG_HWM_FAN_1_ENABLE
 	&sensor_dev_attr_fan2_input.dev_attr.attr,
 	&sensor_dev_attr_fan2_label.dev_attr.attr,
+#endif
+
+// Fan input 2
+#if CONFIG_HWM_FAN_2_ENABLE
+	&sensor_dev_attr_fan3_input.dev_attr.attr,
+	&sensor_dev_attr_fan3_label.dev_attr.attr,
 #endif
 
 	NULL,
@@ -400,108 +418,108 @@ static struct attribute_group __hwm_fan_group = {
 
 // ===== PWM 0 =====
 #if CONFIG_HWM_PWM_0_ENABLE
-static SENSOR_DEVICE_ATTR_2(pwm0, 0644, __hwm_sensor_register_show,
+static SENSOR_DEVICE_ATTR_2(pwm1, 0644, __hwm_sensor_register_show,
 			    __hwm_sensor_register_store, HWM_SENSOR_INDEX_PWM,
 			    0);
-static SENSOR_DEVICE_ATTR_2(pwm0_label, 0644, __hwm_sensor_label_show, NULL,
+static SENSOR_DEVICE_ATTR_2(pwm1_label, 0644, __hwm_sensor_label_show, NULL,
 			    HWM_SENSOR_INDEX_PWM, 0);
 #endif
 
 // ===== PWM 1 =====
 #if CONFIG_HWM_PWM_1_ENABLE
-static SENSOR_DEVICE_ATTR_2(pwm1, 0644, __hwm_sensor_register_show,
+static SENSOR_DEVICE_ATTR_2(pwm2, 0644, __hwm_sensor_register_show,
 			    __hwm_sensor_register_store, HWM_SENSOR_INDEX_PWM,
 			    1);
-static SENSOR_DEVICE_ATTR_2(pwm1_label, 0644, __hwm_sensor_label_show, NULL,
+static SENSOR_DEVICE_ATTR_2(pwm2_label, 0644, __hwm_sensor_label_show, NULL,
 			    HWM_SENSOR_INDEX_PWM, 1);
 #endif
 
 // ===== PWM 2 =====
 #if CONFIG_HWM_PWM_2_ENABLE
-static SENSOR_DEVICE_ATTR_2(pwm2, 0644, __hwm_sensor_register_show,
+static SENSOR_DEVICE_ATTR_2(pwm3, 0644, __hwm_sensor_register_show,
 			    __hwm_sensor_register_store, HWM_SENSOR_INDEX_PWM,
 			    2);
-static SENSOR_DEVICE_ATTR_2(pwm2_label, 0644, __hwm_sensor_label_show, NULL,
+static SENSOR_DEVICE_ATTR_2(pwm3_label, 0644, __hwm_sensor_label_show, NULL,
 			    HWM_SENSOR_INDEX_PWM, 2);
 #endif
 
 // ===== PWM 3 =====
 #if CONFIG_HWM_PWM_3_ENABLE
-static SENSOR_DEVICE_ATTR_2(pwm3, 0644, __hwm_sensor_register_show,
+static SENSOR_DEVICE_ATTR_2(pwm4, 0644, __hwm_sensor_register_show,
 			    __hwm_sensor_register_store, HWM_SENSOR_INDEX_PWM,
 			    3);
-static SENSOR_DEVICE_ATTR_2(pwm3_label, 0644, __hwm_sensor_label_show, NULL,
+static SENSOR_DEVICE_ATTR_2(pwm4_label, 0644, __hwm_sensor_label_show, NULL,
 			    HWM_SENSOR_INDEX_PWM, 3);
 #endif
 
 // ===== PWM 4 =====
 #if CONFIG_HWM_PWM_4_ENABLE
-static SENSOR_DEVICE_ATTR_2(pwm4, 0644, __hwm_sensor_register_show,
+static SENSOR_DEVICE_ATTR_2(pwm5, 0644, __hwm_sensor_register_show,
 			    __hwm_sensor_register_store, HWM_SENSOR_INDEX_PWM,
 			    4);
-static SENSOR_DEVICE_ATTR_2(pwm4_label, 0644, __hwm_sensor_label_show, NULL,
+static SENSOR_DEVICE_ATTR_2(pwm5_label, 0644, __hwm_sensor_label_show, NULL,
 			    HWM_SENSOR_INDEX_PWM, 4);
 #endif
 
 // ===== PWM 5 =====
 #if CONFIG_HWM_PWM_5_ENABLE
-static SENSOR_DEVICE_ATTR_2(pwm5, 0644, __hwm_sensor_register_show,
+static SENSOR_DEVICE_ATTR_2(pwm6, 0644, __hwm_sensor_register_show,
 			    __hwm_sensor_register_store, HWM_SENSOR_INDEX_PWM,
 			    5);
-static SENSOR_DEVICE_ATTR_2(pwm5_label, 0644, __hwm_sensor_label_show, NULL,
+static SENSOR_DEVICE_ATTR_2(pwm6_label, 0644, __hwm_sensor_label_show, NULL,
 			    HWM_SENSOR_INDEX_PWM, 5);
 #endif
 
 // ===== PWM 6 =====
 #if CONFIG_HWM_PWM_6_ENABLE
-static SENSOR_DEVICE_ATTR_2(pwm6, 0644, __hwm_sensor_register_show,
+static SENSOR_DEVICE_ATTR_2(pwm7, 0644, __hwm_sensor_register_show,
 			    __hwm_sensor_register_store, HWM_SENSOR_INDEX_PWM,
 			    6);
-static SENSOR_DEVICE_ATTR_2(pwm6_label, 0644, __hwm_sensor_label_show, NULL,
+static SENSOR_DEVICE_ATTR_2(pwm7_label, 0644, __hwm_sensor_label_show, NULL,
 			    HWM_SENSOR_INDEX_PWM, 6);
 #endif
 
 static struct attribute *__hwm_pwm_attrs[] = {
 // PWM 0
 #if CONFIG_HWM_PWM_0_ENABLE
-	&sensor_dev_attr_pwm0.dev_attr.attr,
-	&sensor_dev_attr_pwm0_label.dev_attr.attr,
-#endif
-
-// PWM 1
-#if CONFIG_HWM_PWM_1_ENABLE
 	&sensor_dev_attr_pwm1.dev_attr.attr,
 	&sensor_dev_attr_pwm1_label.dev_attr.attr,
 #endif
 
-// PWM 2
-#if CONFIG_HWM_PWM_2_ENABLE
+// PWM 1
+#if CONFIG_HWM_PWM_1_ENABLE
 	&sensor_dev_attr_pwm2.dev_attr.attr,
 	&sensor_dev_attr_pwm2_label.dev_attr.attr,
 #endif
 
-// PWM 3
-#if CONFIG_HWM_PWM_3_ENABLE
+// PWM 2
+#if CONFIG_HWM_PWM_2_ENABLE
 	&sensor_dev_attr_pwm3.dev_attr.attr,
 	&sensor_dev_attr_pwm3_label.dev_attr.attr,
 #endif
 
-// PWM 4
-#if CONFIG_HWM_PWM_4_ENABLE
+// PWM 3
+#if CONFIG_HWM_PWM_3_ENABLE
 	&sensor_dev_attr_pwm4.dev_attr.attr,
 	&sensor_dev_attr_pwm4_label.dev_attr.attr,
 #endif
 
-// PWM 5
-#if CONFIG_HWM_PWM_5_ENABLE
+// PWM 4
+#if CONFIG_HWM_PWM_4_ENABLE
 	&sensor_dev_attr_pwm5.dev_attr.attr,
 	&sensor_dev_attr_pwm5_label.dev_attr.attr,
 #endif
 
-// PWM 6
-#if CONFIG_HWM_PWM_6_ENABLE
+// PWM 5
+#if CONFIG_HWM_PWM_5_ENABLE
 	&sensor_dev_attr_pwm6.dev_attr.attr,
 	&sensor_dev_attr_pwm6_label.dev_attr.attr,
+#endif
+
+// PWM 6
+#if CONFIG_HWM_PWM_6_ENABLE
+	&sensor_dev_attr_pwm7.dev_attr.attr,
+	&sensor_dev_attr_pwm7_label.dev_attr.attr,
 #endif
 
 	NULL,
@@ -523,7 +541,7 @@ static const struct attribute_group *__hwm_groups[] = {
 /*
  * HWMON_CHANNEL_INFO() is missing from kernel 4.15's <linux/hwmon.h> (present
  * from 5.4.302 onward, the earliest tree we have that side of the gap; the
- * exact version it arrives in is not measured -- see avalue-driver-4.0#25).
+ * exact version it arrives in is not measured --).
  * Guard on the macro itself rather than a guessed LINUX_VERSION_CODE
  * threshold, and fall back to the plain sysfs attribute groups below
  * (__hwm_groups), which already carry every sensor file and need no chip_info.

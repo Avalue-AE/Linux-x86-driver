@@ -50,16 +50,29 @@ strip_trailing_comment() {
         fi
         out+="$ch"
     done
-    echo "$out"
+    # printf, not echo: an unquoted value that is exactly "-n", "-e" or
+    # "-E" is a valid config value, not an echo option, and plain `echo`
+    # cannot tell the difference -- it swallows the value and this
+    # function's caller captures an empty string instead.
+    printf '%s\n' "$out"
+}
+
+# Leading/trailing whitespace trim with no external process: a bash-only
+# equivalent of `sed 's/^[[:space:]]*//;s/[[:space:]]*$//'`.
+trim_ws() {
+    local v="$1"
+    v="${v#"${v%%[![:space:]]*}"}"
+    v="${v%"${v##*[![:space:]]}"}"
+    printf '%s' "$v"
 }
 
 declare -A CONF_VALUE
 while IFS='=' read -r ckey cvalue; do
     [[ "$ckey" =~ ^#.*$ ]] && continue
     [[ -z "$ckey" ]] && continue
-    ckey=$(echo "$ckey" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    ckey=$(trim_ws "$ckey")
     cvalue=$(strip_trailing_comment "$cvalue")
-    cvalue=$(echo "$cvalue" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    cvalue=$(trim_ws "$cvalue")
     CONF_VALUE["$ckey"]="$cvalue"
 done < "$CONF_FILE"
 
@@ -68,7 +81,13 @@ count_map_elements() {
     # paren depth 0, plus one; an empty body counts 0. A macro call with its
     # own commas inside parentheses (F81966_HWM_REG_VOL(0, 1)) is one element.
     local body="$1" depth=0 count=0 ch i
-    body=$(echo "$body" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    # trim_ws, not a piped sed: a piped external command's own exit status
+    # went unchecked here, so a failing sed silently made this function
+    # return 0 as if the body were empty -- and the caller reports that as
+    # "$MAP has 0 element(s)", blaming a board file that is correct
+    # trim_ws is a bash builtin with no external
+    # process to fail.
+    body=$(trim_ws "$body")
     if [ -z "$body" ]; then
         echo 0
         return
@@ -76,7 +95,7 @@ count_map_elements() {
     # A trailing comma before the closing brace ({ A, B, }) is ordinary,
     # legal C and names no extra element.
     [[ "$body" == *, ]] && body="${body%,}"
-    body=$(echo "$body" | sed 's/[[:space:]]*$//')
+    body=$(trim_ws "$body")
     if [ -z "$body" ]; then
         echo 0
         return
@@ -85,8 +104,8 @@ count_map_elements() {
     for ((i = 0; i < ${#body}; i++)); do
         ch="${body:$i:1}"
         case "$ch" in
-        '{' | '[' | '(') depth=$((depth + 1)) ;;
-        '}' | ']' | ')') depth=$((depth - 1)) ;;
+        '{' | '[' | '(') depth=$((depth + 1)) ;;  # unchecked-ok: '|' here separates case patterns, not a shell pipe -- no command runs on this line
+        '}' | ']' | ')') depth=$((depth - 1)) ;;  # unchecked-ok: same case-pattern alternation as the line above, not a pipe
         ',') [ "$depth" -eq 0 ] && count=$((count + 1)) ;;
         esac
     done
@@ -260,18 +279,18 @@ require_chip_id_key() {
 
 require_chip_id_key
 
-# Issue #75: a voltage channel can be labelled as a board input rail (VIN /
+# An earlier finding: a voltage channel can be labelled as a board input rail (VIN /
 # VIN_L / DCIN) while its divider resistors are both left at 0. With
 # R1=R2=0, src/hal/ec/ite_hwm.c skips the divider math entirely and reports
 # the raw ADC counts as if they were the finished voltage -- exactly what
-# happened on ECM-WHL/EPC-WHL (bench VIN read 1.12V on a 12V board, issue
-# #74). This is a REPORT, never a build failure: DIMM/Threm_*/5V/VRTC/etc
+# happened on ECM-WHL/EPC-WHL: bench VIN read 1.12V on a 12V board. This
+# is a REPORT, never a build failure: DIMM/Threm_*/5V/VRTC/etc
 # rails legitimately carry R1=R2=0 too, so the check is scoped to labels
 # that specifically claim to be a board input rail, and a board file can
 # silence one channel deliberately (see undivided_channel_is_annotated()).
 undivided_channel_is_annotated() {
     local n="$1" enable_key="CONFIG_HWM_VOLTAGE_${n}_ENABLE=" lineno i line
-    lineno=$(grep -n "^${enable_key}" "$CONF_FILE" | head -1 | cut -d: -f1)
+    lineno=$(grep -n "^${enable_key}" "$CONF_FILE" | head -1 | cut -d: -f1)  # unchecked-ok: a grep no-match here is the legitimate "this board has no such _ENABLE key" signal, and the very next line's [ -z "$lineno" ] && return 1 already treats any failure (grep, head or cut) the same conservative way
     [ -z "$lineno" ] && return 1
     i=$((lineno - 1))
     while [ "$i" -ge 1 ]; do
@@ -295,16 +314,19 @@ report_undivided_input_rail() {
     done
     [ "${#channels[@]}" -eq 0 ] && return 0
     local sorted label label_upper r1 r2
-    sorted=$(printf '%s\n' "${channels[@]}" | sort -n)
+    sorted=$(printf '%s\n' "${channels[@]}" | sort -n) || {
+        echo "[CONFIG]: Error: $CONF_FILE: failed to sort voltage channel numbers."
+        exit 1
+    }
     for n in $sorted; do
         label="${CONF_VALUE[CONFIG_HWM_VOLTAGE_${n}_LABEL]}"
         # CONF_VALUE for a _LABEL key still carries its surrounding double
         # quotes literally; strip them before comparing.
         label="${label%\"}"
         label="${label#\"}"
-        label_upper=$(echo "$label" | tr '[:lower:]' '[:upper:]')
+        label_upper="${label^^}"
         case "$label_upper" in
-        VIN | VIN_L | DCIN) ;;
+        VIN | VIN_L | DCIN) ;;  # unchecked-ok: '|' separates case patterns naming the input-rail labels, not a shell pipe -- no command runs on this line
         *) continue ;;
         esac
         r1="${CONF_VALUE[CONFIG_HWM_VOLTAGE_${n}_R1]}"
@@ -317,7 +339,10 @@ report_undivided_input_rail() {
 
 report_undivided_input_rail
 
-mkdir -p "$(dirname "$OUT_FILE")"
+mkdir -p "$(dirname "$OUT_FILE")" || {
+    echo "[CONFIG]: Error: could not create the output directory for $OUT_FILE."
+    exit 1
+}
 
 echo "[CONFIG]: Generating $OUT_FILE from $CONF_FILE ..."
 
@@ -347,9 +372,9 @@ while IFS='=' read -r key value; do
     [[ "$key" =~ ^MAKE_ ]] && continue
     
     # Trim whitespace
-    key=$(echo "$key" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    key=$(trim_ws "$key")
     value=$(strip_trailing_comment "$value")
-    value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    value=$(trim_ws "$value")
     
     # Check if value is a single-quoted character literal (e.g., 'A')
     _re="^'.'$"
@@ -377,7 +402,7 @@ while IFS='=' read -r key value; do
         echo "#define $key $value" >> "$OUT_FILE"
     
     # Check if key ends with _MAP or _CONFIG (array-like, no quotes)
-    elif [[ "$key" =~ _(MAP|CONFIG)$ ]]; then
+    elif [[ "$key" =~ _(MAP|CONFIG)$ ]]; then  # unchecked-ok: '|' is inside a quoted =~ regex group (MAP|CONFIG), not a shell pipe -- [[ ]] has no pipe stage to check
         echo "#define $key $value" >> "$OUT_FILE"
     
     # Otherwise, treat as string (add quotes)

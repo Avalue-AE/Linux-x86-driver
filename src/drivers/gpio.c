@@ -217,6 +217,6 @@ module_exit(gpio_exit);
 
 MODULE_AUTHOR("Avalue Technology Inc.");
 MODULE_AUTHOR("Arthur Huang <arthur_huang@avalue.com>");
-MODULE_DESCRIPTION("Hardware Monitor driver for Avalue boards");
+MODULE_DESCRIPTION("GPIO driver for Avalue boards");
 MODULE_LICENSE("GPL");
 MODULE_VERSION(CONFIG_DRIVER_VERSION);

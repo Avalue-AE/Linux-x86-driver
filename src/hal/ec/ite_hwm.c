@@ -279,13 +279,13 @@ s32 hal_hwm_pwm_read(struct hal_hwm_sensor *sensor)
 	if (sensor == NULL || sensor->type != HWM_SENSOR_TYPE_PWM)
 		return -EINVAL;
 
-	raw = ite_dev.ops->read16(sensor->reg);
+	raw = ite_dev.ops->read8(sensor->reg);
 
 	/* Convert 0-255 to 0-100% */
 	duty = (raw * 100) / 255;
 
-	log_debug("HAL HWM PWM read[0x%04X]: raw=0x%04X, duty=%d %%\n",
-		  UINT16_FROM_BYTES(sensor->reg, sensor->reg + 1), raw, duty);
+	log_debug("HAL HWM PWM read[0x%02X]: raw=0x%02X, duty=%d %%\n",
+		  sensor->reg, raw, duty);
 
 	return duty;
 }
@@ -293,7 +293,6 @@ s32 hal_hwm_pwm_read(struct hal_hwm_sensor *sensor)
 s32 hal_hwm_pwm_write(struct hal_hwm_sensor *sensor, const char *buf,
 		      size_t count)
 {
-	u8 value = 0;
 	u8 reg_value = 0;
 	u32 duty = 0;
 
@@ -305,11 +304,10 @@ s32 hal_hwm_pwm_write(struct hal_hwm_sensor *sensor, const char *buf,
 		duty = 100;
 
 	reg_value = (duty * 255) / 100;
-	ite_dev.ops->write16(sensor->reg, reg_value);
+	ite_dev.ops->write8(sensor->reg, reg_value);
 
-	log_debug("HAL HWM PWM write[0x%04X]: duty=%d%%, raw=0x%04X\n",
-		  UINT16_FROM_BYTES(sensor->reg, sensor->reg + 1), duty,
-		  reg_value);
+	log_debug("HAL HWM PWM write[0x%02X]: duty=%d%%, raw=0x%02X\n",
+		  sensor->reg, duty, reg_value);
 
 	return count;
 }

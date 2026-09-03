@@ -29,17 +29,29 @@ void hal_wdt_start(void)
 
 void hal_wdt_stop(void)
 {
-	// no need for ite chips
+	/* Writing 0 to the two-byte counter is the EC's own disable
+	 * semantic (every board's EC_BRAM_map.md: "0 - Disabled WDT"), the
+	 * same write the legacy 3.x driver's wdt_stop() performs
+	 * (lib/wdt.c -> wdt_set_timeout(0)). nowayout blocked this
+	 * function from ever running until the nowayout module parameter
+	 * was added; it used to be a literal no-op.
+	 */
+	ite_dev.ops->write16(ITE_REG_WDT_TIMEOUT, 0);
 }
 
-void hal_wdt_write(u8 time)
+u16 hal_wdt_max_timeout(void)
+{
+	return 0xFFFF;
+}
+
+void hal_wdt_write(u16 time)
 {
 	ite_dev.ops->write16(ITE_REG_WDT_TIMEOUT, time);
 }
 
-u8 hal_wdt_read(void)
+u16 hal_wdt_read(void)
 {
-	return (u8)(ite_dev.ops->read16(ITE_REG_WDT_TIMEOUT) & 0xFF);
+	return ite_dev.ops->read16(ITE_REG_WDT_TIMEOUT);
 }
 
 s32 hal_wdt_init(void)

@@ -10,10 +10,10 @@ This repository contains the Linux kernel drivers for Avalue industrial motherbo
 
 It provides onboard features including:
 
-* [Watch dog](WDT.md)
-* [GPIO](GPIO.md)
-* [Hardware Monitor](HWM.md)
-* [Misc](MISC.md)
+* [Watch dog](docs/WDT.md)
+* [GPIO](docs/GPIO.md)
+* [Hardware Monitor](docs/HWM.md)
+* [Misc](docs/MISC.md)
 
 ---
 
@@ -93,58 +93,34 @@ per-subsystem targets (`make watchdog`, `make gpio`, `make hwmon`,
 `make misc`) instead. The `4.15.18` row is still a plain `make`; it is the one
 that fails before the compiler runs, on our own incomplete host tree.
 
-Seven of the ten rows are the prepared trees under `/kernels`, and two are a
-tree fetched into `/kernels-cache` -- `test/build-matrix.sh` builds both
-sources (see the script's own header comment, and
-[test/README.md](test/README.md) for how the `/kernels-cache` tree was
-prepared). The AlmaLinux 9.8 row is the only one still built by hand: it is a
-`kernel-devel` package, not a tree under either directory, so
-`test/build-matrix.sh` never builds it -- its row comes from the same plain
-`make`, run by hand against the extracted `kernel-devel` tree.
+Most rows above are graded on what the build printed rather than on its exit
+code, because most of the kernel trees behind them are development trees with
+no `Module.symvers`. Without that file modpost cannot resolve the kernel
+symbols an out-of-tree module imports, and each kernel line answers that
+differently: the 6.x trees turn it into `ERROR: modpost: "..." undefined!` and
+exit 2 even when every object compiled cleanly, 5.15 reports the same symbols
+as `WARNING:` and exits 0, and 5.4 does not report them at all. So "Builds
+clean" above means the compiler ran and printed no `error:` line.
 
-`test/build-matrix.sh` treats every row above except the AlmaLinux one as a
-claim it must measure: a run that never produces that row -- the tree is
-missing, not prepared, or (for the two `4.15.0-101` rows) `$KERNELS_CACHE_DIR`
-itself is absent -- fails the run instead of skipping it quietly.
-`EXCLUDE_KERNELS` is the per-run way to acknowledge a known gap; name a
-kernel there and its absence, like its failure, no longer fails the run.
+**On a normal installation none of that arises.** The `linux-headers` (or
+`kernel-devel`) package for your running kernel ships its own
+`Module.symvers`, modpost resolves every symbol, and the modules link
+completely -- which is what the two `4.15.0-101` rows and the AlmaLinux row
+were built against.
 
-A `/kernels` row is graded on the build output, not on the exit code: at
-least one `CC [M]` line and no lowercase `error:` line. That distinction
-matters on the 6.x rows. None of the trees under `/kernels` carries a
-`Module.symvers`, so modpost there cannot resolve the kernel symbols an
-out-of-tree module imports. Six of the seven `/kernels` rows reach that
-stage, and what differs between them is how each kernel's own modpost
-answers it:
-on all four 6.x trees it fails the build (`ERROR: modpost: "..." undefined!`,
-exit 2, and it prints `You can set KBUILD_MODPOST_WARN=1 to turn errors into
-warning`), while on 5.15 the same unresolved symbols come out as `WARNING:`
-lines and `make` exits 0, and on 5.4 modpost does not report them at all. So a
-6.x row can exit 2 with every object compiled cleanly, and the 5.4 and 5.15
-rows need no allowance. The AlmaLinux row needs none either, for a different
-reason: a `kernel-devel` tree ships its own `Module.symvers`, so there modpost
-resolved every symbol and the modules linked completely.
+The two `4.15.0-101` rows are graded differently again: that kernel's Kbuild
+prints no `CC [M]` lines even on a build that fully succeeds, so those rows
+were graded on whether every subsystem the board declares produced its `.ko`
+-- 3 of 3 and 4 of 4 -- with no `error:` line anywhere in the output. The
+`4.15.18` row is a different case from both: on the tree it was built against
+the build stops before the compiler runs at all, which is that particular
+tree being incomplete rather than the 4.15 kernel line being unsupported --
+the two rows below it are the same kernel line building clean.
 
-The two `4.15.0-101` rows are graded a second, different way: that tree's
-Kbuild prints zero `CC [M]` lines even on a build that fully succeeds, so
-counting compiler lines cannot grade it. Instead every subsystem the board
-declares must produce its `.ko`, and every `make` must exit with no `error:`
-line. The Build status column above still reads "Builds clean" / "Does not
-build"; the raw table that `test/build-matrix.sh` prints shows this as a
-produced-of-expected count (`3/3`, `4/4`) in its own `CC-LINES` column, so a
-reader of the script's own output sees which rule graded a given row.
-
-The `4.15.18` row is outside all of that: on our build host that tree stops
-before the compiler runs, so its build prints no `CC [M]` line and never
-reaches modpost at all. Its row reads "Does not build" for that reason, not
-because of an unresolved symbol. `test/build-matrix.sh` carries this tree as
-a committed exception in `EXPECTED_FAIL_KERNELS`: its own report grades the
-row `FAIL (expected)`, and a run that finds it broken here still exits 0. If
-this tree ever starts building clean, the run exits 1 and names it, because
-that would mean `EXPECTED_FAIL_KERNELS` and this row are both now wrong.
-
-Build status is measured on the two boards `test/build-matrix.sh` builds
-(`EPC-WHL`, `ESM-KX60G`), not on every board this driver supports.
+Build status was measured on two boards, `EPC-WHL` (watchdog, gpio, hwmon)
+and `ESM-KX60G` (all four), chosen because between them they exercise every
+subsystem. It is not a per-board measurement: a board not named here is
+untested on these kernels rather than unsupported.
 
 ---
 
@@ -157,7 +133,7 @@ The build system dynamically selects the target board configuration. It prioriti
 
 Configuration files are located in `configs/boards/`.
 
-Board configuration files are supplied with each board rather than bundled with every copy of this tree — the public GitHub mirror, for example, ships without `configs/boards/`. If yours is missing, create the directory and place the file at `configs/boards/<BOARD_NAME>.conf`; `scripts/config.sh` then turns it into `src/configs/board.h`.
+Each board has its own file. If yours is missing, create it at `configs/boards/<BOARD_NAME>.conf`; `scripts/config.sh` then turns it into `src/configs/board.h`, which the build includes.
 
 ### Checking Your Board Name
 
@@ -210,6 +186,12 @@ make gpio
 make hwmon
 ```
 
+
+* **Misc:**
+```bash
+make misc
+```
+
 ### 4. Debug Mode
 
 To build the Watchdog driver with debug symbols and extra logging enabled:
@@ -229,31 +211,10 @@ make gpio-debug
 make hwmon-debug
 ```
 
-### 5. Multi-kernel Build Check
-
-`test/build-matrix.sh` builds the driver against every prepared kernel tree it
-finds, for `EPC-WHL` (watchdog + hwmon + gpio) and `ESM-KX60G` (all four
-subsystems), and prints a pass/fail table. It needs kernel trees available on
-disk (default `/kernels`, override with the `KERNELS_DIR` environment
-variable).
-
+* **Misc:**
 ```bash
-bash test/build-matrix.sh
+make misc-debug
 ```
-
-This exits **0** on a correctly prepared host. The `linux-4.15.18` row reads
-`FAIL (expected)` -- a committed, known exception (see "Supported kernels"
-above) -- and does not fail the run; every other required row must build
-clean.
-
-Those two boards exercise every subsystem, but they both use the same ITE /
-pca9555 / i801 HALs, so a chip family neither one selects never gets
-compiled. The script also runs a second pass that builds one board per
-distinct HAL "shape" -- the exact set of `src/hal/` files a board's `.conf`
-selects, derived at runtime from `configs/boards/*.conf` -- on `$COVERAGE_KERNEL`
-(default `linux-5.4.302`), so every HAL file any board can reach gets
-compiled at least once. A HAL `.c` file that no build in the run reaches
-fails it.
 
 ---
 

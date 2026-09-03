@@ -30,11 +30,14 @@ void hal_wdt_start(void);
 /** F81966 Watchdog stop */
 void hal_wdt_stop(void);
 
+/** F81966 Watchdog maximum timeout value */
+u16 hal_wdt_max_timeout(void);
+
 /** F81966 Watchdog write timeout value */
-void hal_wdt_write(u8 time);
+void hal_wdt_write(u16 time);
 
 /** F81966 Watchdog read timeout value */
-u8 hal_wdt_read(void);
+u16 hal_wdt_read(void);
 
 extern struct sio_device f81966_dev;
 extern struct bctrl_desc f81966_desc;
@@ -101,18 +104,25 @@ void hal_wdt_stop(void)
 	f81966_dev.ops->exit();
 }
 
-void hal_wdt_write(u8 time)
+u16 hal_wdt_max_timeout(void)
 {
+	return 0xFF;
+}
+
+void hal_wdt_write(u16 time)
+{
+	u8 timeout = (u8)time;
+
 	f81966_dev.ops->enter();
 	f81966_dev.ops->select(F81966_LD7_WDT);
 
-	f81966_dev.ops->write8(F81966_WDT_REG_TIMER, time);
-	log_debug("Writing WDT timeout value: %u\n", time);
+	f81966_dev.ops->write8(F81966_WDT_REG_TIMER, timeout);
+	log_debug("Writing WDT timeout value: %u\n", timeout);
 
 	f81966_dev.ops->exit();
 }
 
-u8 hal_wdt_read(void)
+u16 hal_wdt_read(void)
 {
 	u8 time;
 
