@@ -245,6 +245,9 @@ This command will:
 3. Remove the auto-load configuration from `/etc/modules-load.d/`.
 4. Update the module dependency map (`depmod`).
 
+
+You are welcome to give us suggestions for this website. Please email Technical@avalue.com or github_ae@avalue.com with your suggestions.
+
 ---
 
 #### Contact
