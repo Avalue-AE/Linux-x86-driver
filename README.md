@@ -246,12 +246,13 @@ This command will:
 4. Update the module dependency map (`depmod`).
 
 
-You are welcome to give us suggestions for this website. Please email Technical@avalue.com or github_ae@avalue.com with your suggestions.
-
 ---
 
 #### Contact
 
 Please feel free to report any questions or issues to the support team.
 
-**Copyright © Avalue Technology Co., Ltd. All Rights Reserved.**
+**Copyright © Avalue Technology Co., Ltd. All Rights Reserved.**  
+
+
+You are welcome to give us suggestions for this website. Please email Technical@avalue.com or github_ae@avalue.com with your suggestions.
