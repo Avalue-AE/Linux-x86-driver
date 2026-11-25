@@ -20,7 +20,7 @@ extern struct bctrl_desc ite_desc;
 #define MISC_CONFIG(nr)                                                    \
 	MISC_CONFIG_ATTR(CONFIG_MISC_##nr##_LABEL, CONFIG_MISC_##nr##_IOR, \
 			 CONFIG_MISC_##nr##_IOW, CONFIG_MISC_##nr##_REG,   \
-			 CONFIG_MISC_##nr##_MASK)
+			 CONFIG_MISC_##nr##_MASK, CONFIG_MISC_##nr##_MAX)
 
 /** ITE MISC map */
 static const u8 hal_misc_map[CONFIG_MISC_NUM] = CONFIG_MISC_MAP;
@@ -98,6 +98,9 @@ s32 hal_misc_read(struct hal_misc_config *cfg, u32 *kdata)
 s32 hal_misc_write(struct hal_misc_config *cfg, u32 *udata)
 {
 	u8 data = 0;
+
+	if (*udata > cfg->max)
+		return -ERANGE;
 
 	data = ite_dev.ops->read8(cfg->reg);
 	data = (data & ~cfg->mask) | ((u8)(*udata) & cfg->mask);

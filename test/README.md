@@ -7,7 +7,7 @@ board actually does -- not what a build was told it would do.
 
 | Test | Needs | Answers |
 |---|---|---|
-| [`board-acceptance.sh`](board-acceptance.sh) | root, the drivers loaded | Does every subsystem this board presents behave? Writes a Markdown report and ends on RELEASE or DEBUG. |
+| [`board-acceptance.sh`](board-acceptance.sh) | root, a matching board configuration | Installs missing dependencies, builds and loads the drivers, then tests every subsystem this board presents. Writes a Markdown report and ends on RELEASE or DEBUG. |
 | [`test-gpio.sh`](test-gpio.sh) | root, `gpiod` tools, loopback wiring | Does every GPIO line drive and read back, in both directions? |
 
 Start with `board-acceptance.sh`: it covers all four subsystems and needs no
@@ -31,19 +31,18 @@ This needs the GPIO driver loaded, root access, and the `gpiodetect`,
 board's GPIO lines to the matching line in the second half before running
 it. The test drives both directions and both values across every pair.
 
-**Every pair is tested, and a failing one does not end the run**, because which
-*other* pairs responded is the only thing that separates the two findings a
-failure here can be. Three outcomes, and they are different findings:
+**Every pair is tested, and a failing one does not end the run.** Passing pairs
+establish that those paths work, while failed pairs identify where to inspect
+the jumper, pin map, and output signal. Three outcomes are reported:
 
 | outcome | exit | what it means |
 |---|---|---|
 | every pair followed | `0` | `All <N> GPIO line pair tests passed.` |
-| some followed, some did not | `1` | the wiring is demonstrably present, so the pairs that did not follow are the board |
-| **no pair followed, either direction** | `2` | either no loopback wiring is fitted or the driver's output never reaches the pins — this test cannot tell those apart, and says so rather than picking one |
+| some followed, some did not | `1` | lists the directed pairs that did not follow; check each pair's wiring and output path before assigning cause |
+| **no pair followed, either direction** | `2` | check loopback jumpers, pin mapping, and output signals; input reads alone do not assign a cause |
 
-Stopping at the first failing pair, as this used to, reports one pair as though
-it were the finding and throws away the evidence that would have told those
-apart.
+Stopping at the first failing pair, as this used to, loses the pattern across
+all pairs. A passing pair does not verify a different pair's physical wiring.
 
 **`gpioset` must hold the line while `gpioget` reads it, and which libgpiod is
 installed decides whether it does so on its own.** v1 defaults to
@@ -93,11 +92,10 @@ Last means a reset costs nothing already measured — and the report is written 
 disk *before* the device is opened, so a board that goes down still leaves
 behind everything measured up to that moment, saying so in the report.
 
-It discovers what to test from the running system rather than from a board
-configuration file, so it ships with the driver and a customer can run it on
-the board in front of them. What it finds is the expectation: the hwmon device
-the driver registered, the channels it published, the gpiochip it added, the
-watchdog it registered. Missing dependencies are installed automatically —
+It uses the board configuration to build the kernel modules, then discovers
+what to test from the running system. What it finds is the expectation: the
+hwmon device the driver registered, the channels it published, the gpiochip
+it added, the watchdog it registered. Missing dependencies are installed automatically —
 `gpiod` for the GPIO checks, through whichever of apt/dnf/yum/zypper/pacman the
 distribution has — and `--no-install` turns that off, skipping what it needed.
 
@@ -106,11 +104,23 @@ distribution has — and `--no-install` turns that off, skipping what it needed.
 is not loaded" look identical, and reporting both as a skip is how a real fault
 hides inside a RELEASE verdict — the first hardware run of this test reported
 `wdt`, `gpio` and `misc` as plain skips on a board whose configuration builds
-two of them. So `modprobe` is asked to resolve each name first, and one it finds
-but cannot load is a **failure**. `--no-load` turns the loading off.
+two of them. This run loads a compiled `.ko` directly when present. When using
+installed modules, `modprobe` resolves each name and a load failure is a
+**failure**. `--no-load` leaves loading to the operator.
 
-A name `modprobe` cannot resolve is reported as **exactly that** — no module of
-that name is installed on this machine — and recorded as a **skip**, missing
+Before loading, a real-board run installs missing build tools and headers for
+the running kernel, cleans old build artifacts, and compiles the DMI board's
+configuration. A build or dependency failure is a **FAIL** in the report. The
+resulting `.ko` files are inserted directly after loading their kernel
+dependencies. This selects the Avalue `gpio.ko` even where `modprobe gpio`
+would select the kernel's GPIO NAND driver. `--no-install` leaves missing
+packages for the operator to install, `--no-build` uses existing modules, and
+`--no-load` leaves unloaded modules untested. The script does not install
+modules for boot; the build and load belong to this acceptance run.
+
+A name `modprobe` cannot resolve when using installed modules is reported as
+**exactly that** — no module of that name is installed on this machine — and
+recorded as a **skip**, missing
 coverage. It is deliberately not called "this board has no such subsystem":
 `modprobe` resolves against *installed* modules, so a board that builds the
 driver and was never `make install`ed lands in the same branch, and the stronger
@@ -160,10 +170,15 @@ What it checks, per area:
   `gpio` and the kernel's own module wins the name. Without this check that
   reads as `PASS ... gpio loads`, and every GPIO check after it is looking for
   a chip a driver that was never loaded would have registered.
-- **hwm** — the hwmon device exists; every channel reads a plausible value for
-  its quantity; **both sysfs layouts name the same channels**, so a write to
-  `pwm1` reaches the channel `pwm/pwm1` describes; every PWM channel says
-  what it drives.
+- **hwm** — the hwmon device exists; readable channels return plausible values
+  for their quantities, while write-only PWM channels are recorded as skips;
+  **both sysfs layouts name the same channels**, so a write to `pwm1` reaches
+  the channel `pwm/pwm1` describes; every PWM channel says what it drives.
+  A fan PWM is changed only when its current duty is readable, allowing the
+  test to restore the original duty after checking the fan. When a board
+  configuration expects duty read-back but the resident module still exposes
+  a write-only PWM, the mismatch is a failure. Unload that older hwm module
+  before rerunning acceptance so the new build can be inserted.
 - **gpio** — a gpiochip labelled `gpio` with an even, readable line count; every
   line is read and the ones that refuse are **named**, not just counted; the
   line map and the values at rest go into the report, so a loopback failure can
@@ -197,12 +212,15 @@ flag:
 - **Drive the GPIO lines?** Runs `test/test-gpio.sh`, which needs pin-to-pin
   loopback wiring. The question asks the operator to answer yes **only if that
   wiring is fitted**, because that is the one fact the test cannot measure for
-  itself — and it is what decides how a total failure reads. A failure carries
-  **everything** that test printed, not only its error line: the hold mode, and
-  which pairs responded, are what separate a dead line from an unwired bench
-  from a `gpioset` that released the line before it could be read. The hold mode
-  is recorded on a pass too — a loopback that passed says which libgpiod it
-  passed with.
+  itself. The terminal names failing directions in one line. The report's
+  **GPIO details** section shows each input-read value, line directions after
+  that sweep, and directed loopback readings on separate lines. Passing pairs
+  identify working paths; they do not establish the wiring or driver state of
+  another pair.
+  The read sweep requests every line as an input, so that direction snapshot
+  does not establish whether a board's physical pins have fixed directions.
+  The hold mode is recorded on a pass too, so the result says which libgpiod
+  it passed with.
 - **Arm the watchdog?** Checks that it counts down, that a ping refreshes the
   countdown, and that a magic close does what `nowayout` says it should.
 

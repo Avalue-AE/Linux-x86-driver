@@ -6,7 +6,7 @@ ifneq ($(BOARD_NAME),)
 ifeq ($(wildcard $(BOARD_CONFIG)),)
 $(error Config file '$(BOARD_CONFIG)' not found! Please run 'make BOARD_NAME=xxx')
 endif
-include $(BOARD_CONFIG)
+include $(M)/scripts/board-conf.mk
 endif
 
 # ========================= Generate Board Header =======================
@@ -54,8 +54,10 @@ endif
 
 # GPIO driver module
 ifeq ($(MAKE_GPIO),m)
-    HAL_CHIP := src/hal/$(MAKE_GPIO_DEVICE)/$(MAKE_GPIO_CHIPSET).o
-    HAL_CHIP_GPIO := src/hal/$(MAKE_GPIO_DEVICE)/$(MAKE_GPIO_CHIPSET)_gpio.o
+    # TCA9555 uses the PCA9555 input/output/configuration command map.
+    GPIO_HAL_CHIPSET := $(if $(filter tca9555,$(MAKE_GPIO_CHIPSET)),pca9555,$(MAKE_GPIO_CHIPSET))
+    HAL_CHIP := src/hal/$(MAKE_GPIO_DEVICE)/$(GPIO_HAL_CHIPSET).o
+    HAL_CHIP_GPIO := src/hal/$(MAKE_GPIO_DEVICE)/$(GPIO_HAL_CHIPSET)_gpio.o
     # SMBus GPIO parts also need a host-controller protocol object (i801 /
     # zhaoxin); EC-native GPIO (ec/ite) has none, so include it only when set.
     HAL_PROTO := $(if $(MAKE_GPIO_PROTOCOL),src/hal/$(MAKE_GPIO_DEVICE)/$(MAKE_GPIO_PROTOCOL).o)

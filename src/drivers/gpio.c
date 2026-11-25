@@ -181,25 +181,33 @@ static int __init gpio_init(void)
 	if (IS_ERR(__priv.pdev)) {
 		ret = PTR_ERR(__priv.pdev);
 		log_err("Failed to register platform device: %d\n", ret);
-		return ret;
+		goto err_hal;
 	}
 
 	__priv.desc = hal_gpio_desc();
 	if (IS_ERR(__priv.desc)) {
 		ret = PTR_ERR(__priv.desc);
 		log_err("Failed to get HAL GPIO descriptor\n");
-		return ret;
+		goto err_pdev;
 	}
 
 	ret = devm_gpiochip_add_data(&__priv.pdev->dev, __priv.gc, &__priv);
 	if (ret < 0) {
 		log_err("Failed to register GPIO chip: %d\n", ret);
-		return ret;
+		goto err_pdev;
 	}
 
 	log_info("GPIO driver initialized successfully, gpiochip%d\n",
 		 __priv.gc->base);
 	return 0;
+
+	// A failed load never reaches gpio_exit(), so what hal_gpio_init()
+	// took (the SMBus port range) has to be given back here.
+err_pdev:
+	platform_device_unregister(__priv.pdev);
+err_hal:
+	hal_gpio_exit();
+	return ret;
 }
 
 static void __exit gpio_exit(void)

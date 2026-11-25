@@ -186,3 +186,6 @@ sphinx_*/
 
 # Generated board configuration headers
 /src/configs/board.h
+
+# Board-provided EC BRAM maps are kept outside this repository.
+docs/*-BRAM.md

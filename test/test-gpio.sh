@@ -76,13 +76,10 @@ echo "Using gpioset hold: ${GPIOSET_HOLD:-none needed, this gpioset holds until 
 # then the reverse. gpioset is run in the background to hold the driven value
 # while gpioget reads it, then killed to release the line before the next read.
 #
-# A pair that does not follow is RECORDED rather than ending the run. Which
-# other pairs did is the only evidence that separates the two things a failure
-# here can mean: with some pairs following and others not, the wiring is present
-# and the ones that failed are the fault -- while none following at all is what
-# a bench with no loopback wiring fitted looks like, and also what a driver
-# whose output never reaches the pins looks like. Stopping at the first failure
-# throws that evidence away and reports one pair as though it were the finding.
+# A pair that does not follow is RECORDED rather than ending the run. Passing
+# pairs establish that those paths work; they cannot verify the jumper or pins
+# of a different pair. Listing both patterns lets the operator inspect the
+# failed pair's wiring, mapping, and output path without losing that evidence.
 HALF=$((GPIO_LINES / 2))
 TOTAL=$((HALF * 2))
 PAIRS_PASSED=0
@@ -150,16 +147,15 @@ fi
 if [ "$PAIRS_PASSED" -eq 0 ]; then
 	echo "Error: no line pair responded, in either direction -- all $TOTAL failed."
 	echo "       Every input stayed at its idle level whatever was driven at the"
-	echo "       other end. Two things look exactly like this and this test cannot"
-	echo "       tell them apart on its own: a bench with no loopback wiring fitted,"
-	echo "       and a driver whose output never reaches the pins. Fit the wiring"
-	echo "       and run again -- if it still fails this way, the wiring is not the"
-	echo "       explanation and the driver is."
+	echo "       other end. Check the loopback jumpers, pin mapping, and output"
+	echo "       signals. This test cannot assign a cause from input reads alone."
 	echo "       $PAIRS_FAILED"
 	exit 2
 fi
 
-echo "Error: $PAIRS_PASSED of $TOTAL line pairs passed and the rest did not, so the"
-echo "       wiring is present and these pairs are the fault:"
+echo "Error: $PAIRS_PASSED of $TOTAL directed line-pair tests passed."
+echo "       These directed pairs did not follow the driven value:"
 echo "       $PAIRS_FAILED"
+echo "       Passing pairs confirm only their own paths. Check the jumpers, pin"
+echo "       mapping, and output signals of each failed pair before assigning cause."
 exit 1

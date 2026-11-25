@@ -14,11 +14,13 @@
 #include "log.h"
 
 extern s32 smb_probe(struct smb_device *dev);
+extern void smb_remove(struct smb_device *dev);
 extern s32 smb_ready(struct smb_device *dev);
 extern s32 smb_read8(struct smb_device *dev, u8 addr, u8 cmd, u8 *out);
 extern s32 smb_write8(struct smb_device *dev, u8 addr, u8 cmd, u8 value);
 
 static s32 __nct5655_gpio_read_value(struct smb_device *sdev, u16 *out);
+static s32 __nct5655_gpio_read_output(struct smb_device *sdev, u16 *out);
 static s32 __nct5655_gpio_write_value(struct smb_device *sdev, u16 val);
 static s32 __nct5655_gpio_read_direction(struct smb_device *sdev, u16 *out);
 static s32 __nct5655_gpio_write_direction(struct smb_device *sdev, u16 dir);
@@ -38,11 +40,13 @@ static struct smb_gpio gpio = {
 	.ngpio = 16, // Number of GPIO pins supported
 
 	.probe = smb_probe,
+	.remove = smb_remove,
 	.ready = smb_ready,
 	.read8 = smb_read8,
 	.write8 = smb_write8,
 
 	.read_value = __nct5655_gpio_read_value,
+	.read_output = __nct5655_gpio_read_output,
 	.write_value = __nct5655_gpio_write_value,
 	.read_direction = __nct5655_gpio_read_direction,
 	.write_direction = __nct5655_gpio_write_direction,
@@ -96,6 +100,36 @@ static s32 __nct5655_gpio_read_value(struct smb_device *sdev, u16 *out)
 	log_debug("value: 0x%04X\n", gdev->value.full);
 	
 	*out = gdev->value.full;
+	return 0;
+}
+
+/*
+ * Reads the output latch: what each pin is driven to, as opposed to the level
+ * sensed on it (read_value). A read-modify-write of the outputs starts from
+ * this, so changing one pin writes every other latch back as it was. It leaves
+ * gdev->value alone, which read_value fills with the sensed level.
+ */
+static s32 __nct5655_gpio_read_output(struct smb_device *sdev, u16 *out)
+{
+	s32 ret = 0;
+	u8 low = 0, high = 0;
+
+	ret = sdev->gpio->read8(sdev, sdev->cfg->slave_addr1,
+				SMBUS_OUTPUT_PORT(0), &low);
+	if (ret < 0) {
+		log_err("Failed to read SMBus output port 0\n");
+		return ret;
+	}
+
+	ret = sdev->gpio->read8(sdev, sdev->cfg->slave_addr2,
+				SMBUS_OUTPUT_PORT(1), &high);
+	if (ret < 0) {
+		log_err("Failed to read SMBus output port 1\n");
+		return ret;
+	}
+
+	*out = UINT16_FROM_BYTES(high, low);
+	log_debug("output: 0x%04X\n", *out);
 	return 0;
 }
 

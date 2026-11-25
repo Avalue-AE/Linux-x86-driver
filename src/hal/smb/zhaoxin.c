@@ -99,6 +99,19 @@ s32 smb_probe(struct smb_device *dev)
 }
 
 /**
+ * smb_remove - nothing to give back
+ * @dev: SMBus device handle
+ *
+ * smb_probe() above only locates the controller and holds no resource, so
+ * there is nothing to release. The hook exists because the chip HALs call it
+ * on unload for whichever protocol is linked.
+ */
+void smb_remove(struct smb_device *dev)
+{
+	(void)dev;
+}
+
+/**
  * smb_ready - prepare the controller for a transaction (pre-poll)
  *
  * Clears the host-status "start" bit and waits for the ready value, as the

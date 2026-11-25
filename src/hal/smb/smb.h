@@ -25,14 +25,6 @@
 #define SMBUS_POLAR_INVERT(n) ((0x04 + (n)))
 #define SMBUS_CONFIGURATION(n) ((0x06 + (n)))
 
-#define SMBUS_ERROR_BUSY BIT(1)
-#define SMBUS_ERROR_FAILED BIT(2)
-#define SMBUS_ERROR_DEVERR BIT(3)
-#define SMBUS_ERROR_TIMEOUT BIT(4)
-#define SMBUS_ERROR_COLLISION BIT(5)
-#define SMBUS_ERROR_ALERT BIT(6)
-#define SMBUS_ERROR_PEC BIT(7)
-
 #define SMBUS_GPIO_PIN_LABEL(_id) "GPIO" #_id
 #define SMBUS_GPIO_PIN_MASK(_id) (1 << _id)
 
@@ -43,11 +35,15 @@ struct smb_gpio {
 	u16 ngpio; // Number of GPIO pins
 
 	s32 (*probe)(struct smb_device *sdev);
+	void (*remove)(struct smb_device *sdev);
 	s32 (*ready)(struct smb_device *sdev);
 	s32 (*read8)(struct smb_device *sdev, u8 addr, u8 cmd, u8 *out);
 	s32 (*write8)(struct smb_device *sdev, u8 addr, u8 cmd, u8 value);
 
+	/* The level sensed on each pin (the chip's input port registers). */
 	s32 (*read_value)(struct smb_device *sdev, u16 *out);
+	/* What each pin is driven to (the chip's output port registers). */
+	s32 (*read_output)(struct smb_device *sdev, u16 *out);
 	s32 (*write_value)(struct smb_device *sdev, u16 val);
 	s32 (*read_direction)(struct smb_device *sdev, u16 *out);
 	s32 (*write_direction)(struct smb_device *sdev, u16 dir);
@@ -75,6 +71,8 @@ struct smb_device {
  * Chip HALs (nct5655, pca9555) call these names and are protocol-agnostic.
  */
 s32 smb_probe(struct smb_device *dev);
+/* Gives back whatever smb_probe() took; safe to call after a failed probe. */
+void smb_remove(struct smb_device *dev);
 s32 smb_ready(struct smb_device *dev);
 s32 smb_read8(struct smb_device *dev, u8 addr, u8 cmd, u8 *out);
 s32 smb_write8(struct smb_device *dev, u8 addr, u8 cmd, u8 value);

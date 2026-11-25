@@ -68,6 +68,10 @@
 #define CONFIG_HWM_PWM_0_ENABLE 0
 #endif
 
+#ifndef CONFIG_HWM_PWM_WRITE_ONLY
+#define CONFIG_HWM_PWM_WRITE_ONLY 0
+#endif
+
 #ifndef CONFIG_HWM_PWM_1_ENABLE
 #define CONFIG_HWM_PWM_1_ENABLE 0
 #endif
@@ -95,6 +99,47 @@
 #ifndef CONFIG_MISC_0_ENABLE
 #define CONFIG_MISC_0_ENABLE 0
 #endif
+
+#ifndef CONFIG_MISC_0_MAX
+#define CONFIG_MISC_0_MAX 0xFFFFFFFFU
+#endif
+
+#ifndef CONFIG_MISC_1_MAX
+#define CONFIG_MISC_1_MAX 0xFFFFFFFFU
+#endif
+
+#ifndef CONFIG_MISC_2_MAX
+#define CONFIG_MISC_2_MAX 0xFFFFFFFFU
+#endif
+
+#ifndef CONFIG_MISC_3_MAX
+#define CONFIG_MISC_3_MAX 0xFFFFFFFFU
+#endif
+
+#ifndef CONFIG_MISC_4_MAX
+#define CONFIG_MISC_4_MAX 0xFFFFFFFFU
+#endif
+
+#ifndef CONFIG_MISC_5_MAX
+#define CONFIG_MISC_5_MAX 0xFFFFFFFFU
+#endif
+
+#ifndef CONFIG_MISC_6_MAX
+#define CONFIG_MISC_6_MAX 0xFFFFFFFFU
+#endif
+
+#ifndef CONFIG_MISC_7_MAX
+#define CONFIG_MISC_7_MAX 0xFFFFFFFFU
+#endif
+
+#ifndef CONFIG_MISC_8_MAX
+#define CONFIG_MISC_8_MAX 0xFFFFFFFFU
+#endif
+
+#ifndef CONFIG_MISC_9_MAX
+#define CONFIG_MISC_9_MAX 0xFFFFFFFFU
+#endif
+
 
 #ifndef CONFIG_MISC_1_ENABLE
 #define CONFIG_MISC_1_ENABLE 0

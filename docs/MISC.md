@@ -16,7 +16,8 @@ are met:
   loaded. Check with `lsmod | grep misc`.
 * **Device Node:** A character device node `/dev/misc` must exist.
 * **Board Support:** Not every board builds this driver. Only a board whose
-  `.conf` sets `MAKE_MISC_DEVICE=ec` compiles `misc.ko` and creates
+  `.conf` sets `MAKE_MISC_DEVICE=ec`, itself or through the board its
+  `CONFIG_BOARD_BASE` names, compiles `misc.ko` and creates
   `/dev/misc`; a board that does not set it has neither. See
   [Section 5](#5-which-boards-have-this-device) for the current list.
 * **Root Privileges:** The device node itself is created world read/write
@@ -204,11 +205,18 @@ board files, so it is the current answer. The same query, run directly:
 ```
 $ grep -l '^MAKE_MISC_DEVICE=ec' configs/boards/*.conf
 configs/boards/ECM-ASL.conf
+configs/boards/ECM-PTL.conf
+configs/boards/ECM-WCL.conf
 configs/boards/EMS-ARH.conf
 configs/boards/ESM-KX60G.conf
 configs/boards/HID-2340.conf
 configs/boards/NUC-RPU.conf
 ```
+
+This query reads each file alone, so it misses a board that inherits the key.
+EPC-PTL and EPC-WCL build `misc.ko` too: their files set
+`CONFIG_BOARD_BASE` to ECM-PTL and ECM-WCL. `bash scripts/config.sh --merged
+configs/boards/<BOARD_NAME>.conf` prints a board file as the build reads it.
 
 | Board | Channel(s) | Register | sysfs label | Writable? |
 |---|---|---|---|---|
@@ -217,12 +225,22 @@ configs/boards/NUC-RPU.conf
 | HID-2340 | 0 | `0x20` | `COM1_Mode` | yes |
 | NUC-RPU | 0, 1 | `0x20`, `0x21` | `COM1_Mode`, `COM2_Mode` | yes, yes |
 | ESM-KX60G | 0 | `0x4B` | `EC_FW_Version` | **no** — see Section 3.3 |
+| ECM-PTL | 0–3 | `0x20`, `0x21`, `0x4B`, `0x36` | `UART1_Mode`, `UART2_Mode`, `EC_Firmware_Version`, `BOARD_ID` | yes, yes, no, no |
+| EPC-PTL | 0–3 | `0x20`, `0x21`, `0x4B`, `0x36` | `UART1_Mode`, `UART2_Mode`, `EC_Firmware_Version`, `BOARD_ID` | yes, yes, no, no |
+| ECM-WCL | 0–3 | `0x20`, `0x21`, `0x4B`, `0x36` | `UART1_Mode`, `UART2_Mode`, `EC_Firmware_Version`, `BOARD_ID` | yes, yes, no, no |
+| EPC-WCL | 0–3 | `0x20`, `0x21`, `0x4B`, `0x36` | `UART1_Mode`, `UART2_Mode`, `EC_Firmware_Version`, `BOARD_ID` | yes, yes, no, no |
+
+On ECM-PTL, EPC-PTL, ECM-WCL, and EPC-WCL, the two UART mode channels accept
+`0` (RS232), `1` (RS422), or
+`2` (RS485). A write of `3` returns a range error because that encoding is
+undefined in this board's EC map.
 
 This table names only the boards above; a board not listed here that also sets
 `MAKE_MISC_DEVICE=ec` carries the same shape but its own register and label
-values -- read them from that board's `configs/boards/<BOARD_NAME>.conf`
-(`CONFIG_MISC_<n>_REG`, `_LABEL`, `_IOW`) rather than assuming they match this
-table.
+values -- read them (`CONFIG_MISC_<n>_REG`, `_LABEL`, `_IOW`) from
+`bash scripts/config.sh --merged configs/boards/<BOARD_NAME>.conf`, which
+includes the keys a board inherits through `CONFIG_BOARD_BASE`, rather than
+assuming they match this table.
 
 A board not in this table (any board that does not set `MAKE_MISC_DEVICE`)
 builds no `misc.ko`, and has neither `/dev/misc` nor any of the sysfs files

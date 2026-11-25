@@ -59,6 +59,32 @@ letters, digits, `-`, `_`; truncates at the first other character).
 `CONFIG_BOARD_NAME="ECM-ASL"` to match. If the file is missing, the build stops
 with `Config file '...' not found!`.
 
+### A board that shares another board's hardware
+
+A box PC is often an SBC in an enclosure: same EC, same sensors, same GPIO, but
+the DMI `board_name` differs (`EPC-TWL` is `ECM-TWL` in a box). Give it a thin
+file that names the board it is built on instead of a copy:
+
+```bash
+# configs/boards/EPC-TWL.conf
+CONFIG_BOARD_NAME="EPC-TWL"
+CONFIG_BOARD_BASE="ECM-TWL"
+# STATUS: NOT HARDWARE-VALIDATED
+```
+
+The build reads the base file first and this file second, so this file keeps
+its own name and status, and any key it sets wins over the base -- for example
+`MAKE_GPIO_DEVICE=` and `MAKE_GPIO_CHIPSET=` left empty when the enclosure does
+not wire the GPIO header out. Every other key comes from the base, so a register
+fix on the SBC reaches the box PC with no second edit. `scripts/config.sh`,
+`Makefile` and `Kbuild` (through `scripts/board-conf.mk`) all merge the two files
+the same way; `bash scripts/config.sh --merged configs/boards/EPC-TWL.conf`
+prints the result.
+
+One level only: the base must be a full board file. A missing base, a base that
+sets `CONFIG_BOARD_BASE` itself, and a file that names itself are refused. A
+single-board release package ships the base file beside the board's own.
+
 ---
 
 ## 2. The four subsystems
@@ -89,6 +115,7 @@ under `src/hal/` first.
 | Hardware Monitor | `sio`           | `f81966`         | board-wide `CONFIG_CHIPID` | `src/hal/sio/f81966.c`, `f81966_hwm.c`       |
 | Hardware Monitor | `sio`           | `nct61x6d`       | board-wide `CONFIG_CHIPID` | `src/hal/sio/nct61x6d.c`, `nct61x6d_hwm.c`   |
 | GPIO             | `smb`           | `nct5655`        | `MAKE_GPIO_PROTOCOL=i801` | `src/hal/smb/nct5655.c`, `i801.c`, `nct5655_gpio.c` |
+| GPIO             | `smb`           | `tca9555`        | `MAKE_GPIO_PROTOCOL=i801`; PCA9555-compatible command map | `src/hal/smb/pca9555.c`, `i801.c`, `pca9555_gpio.c` |
 | GPIO             | `smb`           | `pca9555`        | `MAKE_GPIO_PROTOCOL=i801` | `src/hal/smb/pca9555.c`, `i801.c`, `pca9555_gpio.c` |
 | GPIO             | `smb`           | `pca9555`        | `MAKE_GPIO_PROTOCOL=zhaoxin` | `src/hal/smb/pca9555.c`, `zhaoxin.c`, `pca9555_gpio.c` |
 | GPIO             | `ec`            | `ite`            | board-wide `CONFIG_CHIPID`; `CONFIG_GPIO_REG_*` optional | `src/hal/ec/ite.c`, `ite_gpio.c` |
@@ -235,7 +262,7 @@ MAKE_GPIO_CHIPSET=nct5655
 
 # 0 = auto-detect the SMBus base I/O port
 CONFIG_SMBUS_BASE_PORT=0x0000
-# 7-bit SMBus slave address of the GPIO expander
+# Shifted 8-bit bus address: 0x40 corresponds to 7-bit address 0x20
 CONFIG_SMBUS_SLAVE_ADDR1=0x40
 CONFIG_SMBUS_SLAVE_ADDR2=0x40
 
@@ -332,6 +359,9 @@ When the user asks for a new target SBC, follow these steps:
    bit offsets; MISC register/mask for each configurable function.
 3. **Pick the closest existing `.conf` as a template** from the same chip family
    (see the matrix in §2) and copy it to `configs/boards/<BOARD_NAME>.conf`.
+   When the new product is an existing board under another DMI name (a box PC
+   on its SBC), write a thin file with `CONFIG_BOARD_BASE` instead (see §1,
+   "A board that shares another board's hardware") and skip steps 4 and 5.
 4. **Edit the values.** Update `CONFIG_BOARD_NAME`, chip IDs, enabled channels,
    labels, registers, resistors, GPIO offsets, MISC entries. Keep every `_NUM`
    fixed to the chip's real channel count and keep each `_MAP` listing all

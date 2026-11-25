@@ -10,6 +10,7 @@ struct hal_misc_config {
 	u32 iow;
 	u8 reg;
 	u8 mask;
+	u32 max;
 };
 
 #define MISC_CONFIG_NONE       \
@@ -19,15 +20,17 @@ struct hal_misc_config {
 		.iow = 0,      \
 		.reg = 0,      \
 		.mask = 0,     \
+		.max = 0,      \
 	}
 
-#define MISC_CONFIG_ATTR(_lab, _ior, _iow, _reg, _mask) \
+#define MISC_CONFIG_ATTR(_lab, _ior, _iow, _reg, _mask, _max) \
 	{                                               \
 		.label = _lab,                          \
 		.ior = _ior,                            \
 		.iow = _iow,                            \
 		.reg = _reg,                            \
 		.mask = _mask,                          \
+		.max = _max,                            \
 	}
 
 extern s32 hal_misc_read(struct hal_misc_config *cfg, u32 *kdata);

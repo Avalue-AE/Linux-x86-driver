@@ -1,7 +1,26 @@
 #!/bin/bash
 
-CONF_FILE=$1
-OUT_FILE=$2
+# Three forms:
+#   config.sh <board.conf> <board.h>   validate the board file, write the header
+#   config.sh --merged <board.conf>    print the board file as the build reads it,
+#                                      with its CONFIG_BOARD_BASE folded in
+#   config.sh --base <board.conf>      print the base board's name, or nothing
+#                                      when the file names no base
+MERGED_ONLY=0
+BASE_ONLY=0
+if [ "$1" = "--merged" ]; then
+    MERGED_ONLY=1
+    CONF_FILE=$2
+    OUT_FILE=
+elif [ "$1" = "--base" ]; then
+    MERGED_ONLY=1
+    BASE_ONLY=1
+    CONF_FILE=$2
+    OUT_FILE=
+else
+    CONF_FILE=$1
+    OUT_FILE=$2
+fi
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
 # Full clones resolve the version from git tags. A shipped single-board
@@ -16,8 +35,10 @@ VERSION=${VERSION:-unknown}
 
 DATE=$(date +"%Y-%m-%d")
 
-if [ -z "$CONF_FILE" ] || [ -z "$OUT_FILE" ]; then
+if [ -z "$CONF_FILE" ] || { [ "$MERGED_ONLY" -eq 0 ] && [ -z "$OUT_FILE" ]; }; then
     echo "[CONFIG]: Usage: $0 <path_to_conf> <path_to_header>"
+    echo "[CONFIG]:        $0 --merged <path_to_conf>"
+    echo "[CONFIG]:        $0 --base <path_to_conf>"
     exit 1
 fi
 
@@ -66,6 +87,89 @@ trim_ws() {
     printf '%s' "$v"
 }
 
+# A board file may name another board whose hardware it shares:
+#   CONFIG_BOARD_BASE="ECM-TWL"
+# A box PC built on an SBC carries the SBC's EC, sensors and GPIO; only the
+# DMI board_name the build selects by differs, and sometimes what the
+# enclosure leaves unwired. The base file holds the hardware once, so a
+# register fix on the SBC reaches every product built on it; a copy drifts.
+#
+# The merged view is this file's own lines first, then every base line whose
+# key this file does not set -- a key set in both takes this file's value,
+# and this file's own '# STATUS:' banner is the first one a reader meets.
+# Only one level: a base that names a base of its own is refused, so every
+# value of a board is found in at most two files. The Makefile and Kbuild
+# read the same two files in the same precedence (scripts/board-conf.mk).
+conf_line_key() {
+    # The key a value line assigns; nothing for a comment or a blank line.
+    local line="$1"
+    [[ "$line" =~ ^[[:space:]]*# ]] && return 0
+    [[ "$line" == *=* ]] || return 0
+    trim_ws "${line%%=*}"
+}
+
+conf_board_base() {
+    # The CONFIG_BOARD_BASE a board file sets, quotes removed; empty if none.
+    local file="$1" line value=""
+    while IFS= read -r line || [ -n "$line" ]; do
+        [ "$(conf_line_key "$line")" = "CONFIG_BOARD_BASE" ] || continue
+        value=$(strip_trailing_comment "${line#*=}")
+        value=$(trim_ws "$value")
+        value="${value#\"}"
+        value="${value%\"}"
+    done < "$file"
+    printf '%s' "$value"
+}
+
+CONF_READ="$CONF_FILE"
+CONF_DESC="$CONF_FILE"
+BOARD_BASE=$(conf_board_base "$CONF_FILE")
+if [ -n "$BOARD_BASE" ]; then
+    BASE_FILE="$(dirname "$CONF_FILE")/$BOARD_BASE.conf"
+    if [ "$(basename "$CONF_FILE" .conf)" = "$BOARD_BASE" ]; then
+        echo "[CONFIG]: Error: $CONF_FILE sets CONFIG_BOARD_BASE to its own name."
+        exit 1
+    fi
+    if [ ! -f "$BASE_FILE" ]; then
+        echo "[CONFIG]: Error: $CONF_FILE sets CONFIG_BOARD_BASE=\"$BOARD_BASE\" but $BASE_FILE does not exist."
+        exit 1
+    fi
+    if [ -n "$(conf_board_base "$BASE_FILE")" ]; then
+        echo "[CONFIG]: Error: $CONF_FILE inherits $BASE_FILE, which sets CONFIG_BOARD_BASE itself."
+        echo "[CONFIG]:        A base board file holds the hardware in full; point $CONF_FILE at the board that does."
+        exit 1
+    fi
+    CONF_READ=$(mktemp) || {
+        echo "[CONFIG]: Error: could not create a scratch file to merge $CONF_FILE with $BASE_FILE."
+        exit 1
+    }
+    trap 'rm -f "$CONF_READ"' EXIT
+    declare -A OWN_KEY
+    while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s\n' "$line"
+        key=$(conf_line_key "$line")
+        [ -n "$key" ] && OWN_KEY["$key"]=1
+    done < "$CONF_FILE" > "$CONF_READ"
+    while IFS= read -r line || [ -n "$line" ]; do
+        key=$(conf_line_key "$line")
+        [ -n "$key" ] && [ -n "${OWN_KEY[$key]}" ] && continue
+        printf '%s\n' "$line"
+    done < "$BASE_FILE" >> "$CONF_READ"
+    CONF_DESC="$CONF_FILE (base $BASE_FILE)"
+fi
+
+# The base name as every reader here takes it: trailing comment, whitespace
+# and quotes removed, and only after the refusals above have passed.
+if [ "$BASE_ONLY" -eq 1 ]; then
+    [ -n "$BOARD_BASE" ] && printf '%s\n' "$BOARD_BASE"
+    exit 0
+fi
+
+if [ "$MERGED_ONLY" -eq 1 ]; then
+    cat "$CONF_READ"
+    exit $?
+fi
+
 declare -A CONF_VALUE
 while IFS='=' read -r ckey cvalue; do
     [[ "$ckey" =~ ^#.*$ ]] && continue
@@ -74,7 +178,7 @@ while IFS='=' read -r ckey cvalue; do
     cvalue=$(strip_trailing_comment "$cvalue")
     cvalue=$(trim_ws "$cvalue")
     CONF_VALUE["$ckey"]="$cvalue"
-done < "$CONF_FILE"
+done < "$CONF_READ"
 
 count_map_elements() {
     # Top-level element count of a MAP's brace body: commas at brace/bracket/
@@ -120,7 +224,7 @@ require_group_keys() {
     local key
     for key in "$@"; do
         if [ -z "${CONF_VALUE[$key]}" ]; then
-            echo "[CONFIG]: Error: $CONF_FILE builds '$subsys' ($device_key=${CONF_VALUE[$device_key]}, $chipset_key=${CONF_VALUE[$chipset_key]}) but does not set $key."
+            echo "[CONFIG]: Error: $CONF_DESC builds '$subsys' ($device_key=${CONF_VALUE[$device_key]}, $chipset_key=${CONF_VALUE[$chipset_key]}) but does not set $key."
             echo "[CONFIG]:        Every subsystem a board builds must set its _NUM and _MAP keys."
             exit 1
         fi
@@ -140,7 +244,7 @@ require_group_keys() {
         [ "$has_map" -eq 1 ] || continue
         local map_value="${CONF_VALUE[$map_key]}"
         if ! [[ "$map_value" =~ ^\{.*\}$ ]]; then
-            echo "[CONFIG]: Note: $CONF_FILE sets $map_key=$map_value, which this guard cannot read as a { ... } map; not gradable, skipping the count check for $key/$map_key."
+            echo "[CONFIG]: Note: $CONF_DESC sets $map_key=$map_value, which this guard cannot read as a { ... } map; not gradable, skipping the count check for $key/$map_key."
             not_gradable=$((not_gradable + 1))
             continue
         fi
@@ -150,7 +254,7 @@ require_group_keys() {
         counted=$(count_map_elements "$body")
         pairs_checked=$((pairs_checked + 1))
         if ! [[ "$declared" =~ ^[0-9]+$ ]] || [ "$declared" -ne "$counted" ]; then
-            echo "[CONFIG]: Error: $CONF_FILE sets $key=$declared but $map_key has $counted element(s)."
+            echo "[CONFIG]: Error: $CONF_DESC sets $key=$declared but $map_key has $counted element(s)."
             echo "[CONFIG]:        The declared count and the map's element count must match, or the compiler fails 200 lines in with 'excess elements in array initializer'."
             exit 1
         fi
@@ -182,19 +286,19 @@ require_ite_gpio_keys() {
     [ "${CONF_VALUE[MAKE_GPIO_CHIPSET]}" != "ite" ] && return 0
     local dir_fixed="${CONF_VALUE[CONFIG_GPIO_DIR_FIXED]}"
     if [ -z "$dir_fixed" ]; then
-        echo "[CONFIG]: Error: $CONF_FILE builds 'gpio' (MAKE_GPIO_DEVICE=ec, MAKE_GPIO_CHIPSET=ite) but does not set CONFIG_GPIO_DIR_FIXED."
+        echo "[CONFIG]: Error: $CONF_DESC builds 'gpio' (MAKE_GPIO_DEVICE=ec, MAKE_GPIO_CHIPSET=ite) but does not set CONFIG_GPIO_DIR_FIXED."
         echo "[CONFIG]:        Every ITE EC GPIO board must set CONFIG_GPIO_DIR_FIXED (0 or 1) to pick its register layout."
         exit 1
     fi
     if [ "$dir_fixed" != "0" ] && [ "$dir_fixed" != "1" ]; then
-        echo "[CONFIG]: Error: $CONF_FILE sets CONFIG_GPIO_DIR_FIXED=$dir_fixed, but this key must be 0 or 1."
+        echo "[CONFIG]: Error: $CONF_DESC sets CONFIG_GPIO_DIR_FIXED=$dir_fixed, but this key must be 0 or 1."
         echo "[CONFIG]:        0 selects the configurable-direction model, 1 the fixed split-bank model."
         exit 1
     fi
     local key
     for key in CONFIG_GPIO_REG_INPUT CONFIG_GPIO_REG_OUTPUT; do
         if [ -z "${CONF_VALUE[$key]}" ]; then
-            echo "[CONFIG]: Error: $CONF_FILE builds 'gpio' (MAKE_GPIO_DEVICE=ec, MAKE_GPIO_CHIPSET=ite) but does not set $key."
+            echo "[CONFIG]: Error: $CONF_DESC builds 'gpio' (MAKE_GPIO_DEVICE=ec, MAKE_GPIO_CHIPSET=ite) but does not set $key."
             echo "[CONFIG]:        Every ITE EC GPIO board must set its own register addresses; there is no safe default."
             exit 1
         fi
@@ -205,7 +309,7 @@ require_ite_gpio_keys() {
         key=CONFIG_GPIO_REG_DIRECTION
     fi
     if [ -z "${CONF_VALUE[$key]}" ]; then
-        echo "[CONFIG]: Error: $CONF_FILE builds 'gpio' (MAKE_GPIO_DEVICE=ec, MAKE_GPIO_CHIPSET=ite, CONFIG_GPIO_DIR_FIXED=$dir_fixed) but does not set $key."
+        echo "[CONFIG]: Error: $CONF_DESC builds 'gpio' (MAKE_GPIO_DEVICE=ec, MAKE_GPIO_CHIPSET=ite, CONFIG_GPIO_DIR_FIXED=$dir_fixed) but does not set $key."
         echo "[CONFIG]:        Every ITE EC GPIO board must set the register its own CONFIG_GPIO_DIR_FIXED mode uses."
         exit 1
     fi
@@ -233,7 +337,7 @@ require_smb_addr_keys() {
     local key
     for key in CONFIG_SMBUS_BASE_PORT CONFIG_SMBUS_SLAVE_ADDR1 CONFIG_SMBUS_SLAVE_ADDR2; do
         if [ -z "${CONF_VALUE[$key]}" ]; then
-            echo "[CONFIG]: Error: $CONF_FILE builds '$hit' over the smb HAL but does not set $key."
+            echo "[CONFIG]: Error: $CONF_DESC builds '$hit' over the smb HAL but does not set $key."
             echo "[CONFIG]:        Every board on the SMBus host protocol must name its own bus address; there is no safe default."
             exit 1
         fi
@@ -271,7 +375,7 @@ require_chip_id_key() {
     done
     [ -z "$hit" ] && return 0
     if [ -z "${CONF_VALUE[CONFIG_CHIPID]}" ] || ! [[ "${CONF_VALUE[CONFIG_CHIPID]}" =~ ^0x[0-9A-Fa-f]+$ ]]; then
-        echo "[CONFIG]: Error: $CONF_FILE builds '$hit' over a chip HAL but does not set CONFIG_CHIPID to a hex literal (0x????)."
+        echo "[CONFIG]: Error: $CONF_DESC builds '$hit' over a chip HAL but does not set CONFIG_CHIPID to a hex literal (0x????)."
         echo "[CONFIG]:        Every board on the ite / f81966 / nct61x6d chip HALs must name its own chip id as 0x<hex>; there is no safe default."
         exit 1
     fi
@@ -290,11 +394,11 @@ require_chip_id_key
 # silence one channel deliberately (see undivided_channel_is_annotated()).
 undivided_channel_is_annotated() {
     local n="$1" enable_key="CONFIG_HWM_VOLTAGE_${n}_ENABLE=" lineno i line
-    lineno=$(grep -n "^${enable_key}" "$CONF_FILE" | head -1 | cut -d: -f1)  # unchecked-ok: a grep no-match here is the legitimate "this board has no such _ENABLE key" signal, and the very next line's [ -z "$lineno" ] && return 1 already treats any failure (grep, head or cut) the same conservative way
+    lineno=$(grep -n "^${enable_key}" "$CONF_READ" | head -1 | cut -d: -f1)  # unchecked-ok: a grep no-match here is the legitimate "this board has no such _ENABLE key" signal, and the very next line's [ -z "$lineno" ] && return 1 already treats any failure (grep, head or cut) the same conservative way
     [ -z "$lineno" ] && return 1
     i=$((lineno - 1))
     while [ "$i" -ge 1 ]; do
-        line=$(sed -n "${i}p" "$CONF_FILE")
+        line=$(sed -n "${i}p" "$CONF_READ")
         if [[ "$line" =~ ^[[:space:]]*# ]]; then
             [[ "$line" == *UNDIVIDED-ON-PURPOSE* ]] && return 0
             i=$((i - 1))
@@ -315,7 +419,7 @@ report_undivided_input_rail() {
     [ "${#channels[@]}" -eq 0 ] && return 0
     local sorted label label_upper r1 r2
     sorted=$(printf '%s\n' "${channels[@]}" | sort -n) || {
-        echo "[CONFIG]: Error: $CONF_FILE: failed to sort voltage channel numbers."
+        echo "[CONFIG]: Error: $CONF_DESC: failed to sort voltage channel numbers."
         exit 1
     }
     for n in $sorted; do
@@ -333,7 +437,7 @@ report_undivided_input_rail() {
         r2="${CONF_VALUE[CONFIG_HWM_VOLTAGE_${n}_R2]}"
         [ "$r1" = "0" ] && [ "$r2" = "0" ] || continue
         undivided_channel_is_annotated "$n" && continue
-        echo "[CONFIG]: Report: $CONF_FILE channel $n label \"$label\" has R1=0 and R2=0 -- reads the raw ADC value as the voltage on a rail whose label names a board input (VIN/VIN_L/DCIN). Set real R1/R2 from the schematic, or add a \"# UNDIVIDED-ON-PURPOSE: <why>\" comment line immediately above its _ENABLE key if this is deliberate."
+        echo "[CONFIG]: Report: $CONF_DESC channel $n label \"$label\" has R1=0 and R2=0 -- reads the raw ADC value as the voltage on a rail whose label names a board input (VIN/VIN_L/DCIN). Set real R1/R2 from the schematic, or add a \"# UNDIVIDED-ON-PURPOSE: <why>\" comment line immediately above its _ENABLE key if this is deliberate."
     done
 }
 
@@ -344,13 +448,13 @@ mkdir -p "$(dirname "$OUT_FILE")" || {
     exit 1
 }
 
-echo "[CONFIG]: Generating $OUT_FILE from $CONF_FILE ..."
+echo "[CONFIG]: Generating $OUT_FILE from $CONF_DESC ..."
 
 
 cat <<EOF > "$OUT_FILE"
 /** 
  * ==============================
- * Auto-generated from $CONF_FILE
+ * Auto-generated from $CONF_DESC
  * DO NOT EDIT DIRECTLY
  * Generated at $DATE Driver v$VERSION
  * ==============================
@@ -409,7 +513,7 @@ while IFS='=' read -r key value; do
     else
         echo "#define $key \"$value\"" >> "$OUT_FILE"
     fi
-done < "$CONF_FILE"
+done < "$CONF_READ"
 
 echo -e "\n#endif /** __CONFIGS_BOARD_CONFIG_H__ */" >> "$OUT_FILE"
 

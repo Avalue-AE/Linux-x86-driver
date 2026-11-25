@@ -46,7 +46,7 @@ ifndef SKIP_BOARD_CONFIG
     ifeq ($(wildcard $(BOARD_CONFIG)),)
         $(error Config file '$(BOARD_CONFIG)' not found! Create it at configs/boards/$(BOARD_NAME).conf -- see README.md's Board Configuration section and scripts/config.sh)
     endif
-    include $(BOARD_CONFIG)
+    include scripts/board-conf.mk
 endif
 
 # ========================= Driver Configurations ============================
@@ -181,6 +181,7 @@ config:
 	@# BOARD_NAME switch and the build fails on undefined CONFIG_* macros.
 	@if [ ! -f $(BOARD_HEADER) ] \
 	    || [ $(BOARD_CONFIG) -nt $(BOARD_HEADER) ] \
+	    || { [ -n "$(BOARD_BASE_CONFIG)" ] && [ $(BOARD_BASE_CONFIG) -nt $(BOARD_HEADER) ]; } \
 	    || [ scripts/config.sh -nt $(BOARD_HEADER) ] \
 	    || ! grep -qF '#define CONFIG_BOARD_NAME "$(BOARD_NAME)"' $(BOARD_HEADER); then \
 		echo "[MAKEFILE]: Generating board header '$(BOARD_HEADER)' from '$(BOARD_CONFIG)'"; \

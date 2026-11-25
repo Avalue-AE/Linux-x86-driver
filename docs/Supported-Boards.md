@@ -49,6 +49,7 @@ all -- a missing marker is not evidence of testing).
 | ECM-EHL | WDT, HWM, GPIO | No |  |
 | ECM-EHL3 | WDT, HWM, GPIO | No |  |
 | ECM-MTL | WDT, HWM, GPIO | No |  |
+| ECM-PTL | WDT, HWM, GPIO, MISC | Yes | 2026-09-15 |
 | ECM-RPL | WDT, HWM, GPIO | No |  |
 | ECM-SKLH | WDT, HWM, GPIO | No |  |
 | ECM-SKLU | WDT, HWM, GPIO | No |  |
@@ -56,6 +57,7 @@ all -- a missing marker is not evidence of testing).
 | ECM-TGUC | WDT, HWM, GPIO | No |  |
 | ECM-TWL | WDT, HWM, GPIO | No |  |
 | ECM-TWL3 | WDT, HWM, GPIO | No |  |
+| ECM-WCL | WDT, HWM, GPIO, MISC | Yes | 2026-09-16 |
 | ECM-WHL | WDT, HWM, GPIO | Yes | 2026-08-07 |
 | EMS-ARH | WDT, HWM, GPIO, MISC | No |  |
 | EMS-MTH | WDT, HWM, GPIO | No |  |
@@ -83,6 +85,9 @@ all -- a missing marker is not evidence of testing).
 | EMX-W880P | WDT, HWM, GPIO | Yes | 2026-08-12 |
 | EMX-ZXEDP | WDT, HWM, GPIO | No |  |
 | EPC-EHL | WDT, HWM, GPIO | No |  |
+| EPC-PTL | WDT, HWM, GPIO, MISC | Yes | 2026-09-16 |
+| EPC-TWL | WDT, HWM, GPIO | No |  |
+| EPC-WCL | WDT, HWM, GPIO, MISC | Yes | 2026-09-16 |
 | EPC-WHL | WDT, HWM, GPIO | Yes | 2026-08-07 |
 | EPX-APLP | WDT, HWM, GPIO | No |  |
 | EPX-ASLP | WDT, HWM, GPIO | No |  |

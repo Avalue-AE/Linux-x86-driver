@@ -78,9 +78,11 @@ s32 hal_gpio_write_value(struct bctrl_desc *dev, u16 pin, u16 val)
 	}
 
 	mask = BIT(hal_gpio_map[pin]);
-	ret = sdev->gpio->read_value(sdev, &buf);
+	// Start from the output latch, not the sensed pin level: the other
+	// outputs are written back as they were driven.
+	ret = sdev->gpio->read_output(sdev, &buf);
 	if (ret < 0) {
-		log_err("Failed to read GPIO value\n");
+		log_err("Failed to read GPIO output latch\n");
 		return ret;
 	}
 
@@ -160,10 +162,18 @@ s32 hal_gpio_write_direction(struct bctrl_desc *dev, u16 pin, u16 dir)
 s32 hal_gpio_init(void)
 {
 	s32 ret = 0;
+	u16 dir = 0;
 
 	ret = pca9555_dev.gpio->probe(&pca9555_dev);
 	if (ret < 0) {
 		log_err("PCA9555 SMBus probe failed\n");
+		return ret;
+	}
+
+	ret = pca9555_dev.gpio->read_direction(&pca9555_dev, &dir);
+	if (ret < 0) {
+		log_err("PCA9555 does not answer on SMBus: %d\n", ret);
+		pca9555_dev.gpio->remove(&pca9555_dev);
 		return ret;
 	}
 
@@ -173,5 +183,6 @@ s32 hal_gpio_init(void)
 
 void hal_gpio_exit(void)
 {
-	// No specific deinitialization needed for PCA9555 GPIO
+	// Give back what the SMBus protocol layer took at probe
+	pca9555_dev.gpio->remove(&pca9555_dev);
 }

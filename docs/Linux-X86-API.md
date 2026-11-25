@@ -70,16 +70,23 @@ own chip, etc.), so identify the right one first:
 gpiodetect
 ```
 
-Example output:
+Example output, from a Tiger Lake board (the chip numbers, the platform
+controller's label and every line count depend on the board):
 
 ```text
-gpiochip0 [Intel-PCH] (100 lines)
+gpiochip0 [INT34C5:00] (360 lines)
 gpiochip1 [gpio] (16 lines)   <-- this driver's chip
 ```
 
-This driver's chip reports the label `gpio`. Once you have identified it
-(here, `gpiochip1`), use that name for every command below — substitute your
-own chip number.
+This driver's chip is the one whose label column reads exactly `[gpio]`.
+Every line of `gpiodetect` output starts with the word `gpiochip`, so
+searching that output for the text `gpio` matches every chip, including the
+platform's own controller. Once you have identified it (here, `gpiochip1`),
+use that name for every command below — substitute your own chip number.
+
+> **Warning:** drive only the chip labelled `[gpio]`. The platform
+> controller's lines carry board functions such as CPU voltage control;
+> setting one of them as an output can power the board off at once.
 
 ### 1.4 Checking pin status — `gpioinfo`
 
@@ -128,7 +135,10 @@ sudo gpioset gpiochip1 1=0
 ### 1.7 Quick-start script
 
 This script finds the chip by its `gpio` label (so it works whether the
-kernel numbers it `gpiochip0` or `gpiochip7`) and blinks one pin. Save it as
+kernel numbers it `gpiochip0` or `gpiochip7`) and blinks one pin. It matches
+the label column exactly and stops unless exactly one chip carries that
+label, so it never falls back to the platform's own GPIO controller when this
+driver is not loaded (see the warning in section 1.3). Save it as
 `test_gpio.sh`, `chmod +x test_gpio.sh`, then run `sudo ./test_gpio.sh`.
 
 ```bash
@@ -139,10 +149,12 @@ TARGET_LABEL="gpio"   # the label this driver's chip reports
 TEST_PIN=0             # the line offset to toggle
 # ===================================================
 
-CHIP_NAME=$(gpiodetect | grep "$TARGET_LABEL" | awk '{print $1}')
+# Match the label column exactly: a plain text search would also match the
+# platform's own controller, because every gpiodetect line starts "gpiochip".
+CHIP_NAME=$(gpiodetect | awk -v want="[$TARGET_LABEL]" '$2 == want {print $1}')
 
-if [ -z "$CHIP_NAME" ]; then
-    echo "Error: GPIO chip with label '$TARGET_LABEL' not found!"
+if [ "$(echo $CHIP_NAME | wc -w)" -ne 1 ]; then
+    echo "Error: expected exactly one GPIO chip labelled '$TARGET_LABEL', found:" ${CHIP_NAME:-none}
     echo "Is the driver loaded?"
     exit 1
 fi

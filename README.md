@@ -75,7 +75,7 @@ Note column). A line not in this table is simply untested, not unsupported.
 | Distribution | Kernel version | Build status | Note |
 |---|---|---|---|
 | Ubuntu (mainline-style) | 4.15.18 | Does not build | Our build host's tree for this line stops before the compiler runs: a plain `make` ends at `No rule to make target '.../src/hal/ec/ite.o'` with zero `CC [M]` lines. That tree is also missing `scripts/mod/modpost` and `tools/objtool/objtool`, which the six other `/kernels` trees in this table have -- but the build stops earlier than either of those is needed, so this is our tree being incomplete, not the 4.15 kernel line. On a good 4.15 tree the driver does build, one subsystem at a time (see the two rows below). |
-| Ubuntu (fetched `linux-headers` package, not under `/kernels`) | 4.15.0-101 -- EPC-WHL | Builds clean | A real, complete 4.15 tree ([recipe](test/README.md)), built one subsystem at a time: this board declares watchdog, gpio and hwmon (no misc). All 3 produced a `.ko`, `make` exited 0 for each, and every `.ko`'s `modinfo -F vermagic` reads `4.15.0-101-generic SMP mod_unload`. |
+| Ubuntu (fetched `linux-headers` package, not under `/kernels`) | 4.15.0-101 -- EPC-WHL | Builds clean | A real, complete 4.15 tree ([recipe](#building-against-a-fetched-4150-101-tree)), built one subsystem at a time: this board declares watchdog, gpio and hwmon (no misc). All 3 produced a `.ko`, `make` exited 0 for each, and every `.ko`'s `modinfo -F vermagic` reads `4.15.0-101-generic SMP mod_unload`. |
 | Ubuntu (fetched `linux-headers` package, not under `/kernels`) | 4.15.0-101 -- ESM-KX60G | Builds clean | Same tree and method as the row above; this board declares all four subsystems. All 4 produced a `.ko`, `make` exited 0 for each, same `vermagic`. |
 | Ubuntu (mainline-style) | 5.4.302 | Builds clean | |
 | Ubuntu (mainline-style) | 5.15.211 | Builds clean | Needs the `-Wno-error=type-limits` line already in `Kbuild` (the kernel's own `bits.h` GENMASK trips this warning) |
@@ -122,6 +122,47 @@ and `ESM-KX60G` (all four), chosen because between them they exercise every
 subsystem. It is not a per-board measurement: a board not named here is
 untested on these kernels rather than unsupported.
 
+### Building against a fetched 4.15.0-101 tree
+
+The `4.15.0-101` rows were built against Ubuntu 18.04's own kernel header
+packages, which the Ubuntu archive still serves. To rebuild that tree:
+
+1. Fetch the two packages:
+
+```bash
+BASE=http://archive.ubuntu.com/ubuntu/pool/main/l/linux
+curl -fLO $BASE/linux-headers-4.15.0-101_4.15.0-101.102_all.deb
+curl -fLO $BASE/linux-headers-4.15.0-101-generic_4.15.0-101.102_amd64.deb
+```
+
+2. Extract both into the same empty directory. Nothing is installed; both
+   packages unpack under `usr/src/`:
+
+```bash
+mkdir kernel-4.15.0-101
+dpkg-deb -x linux-headers-4.15.0-101_4.15.0-101.102_all.deb kernel-4.15.0-101
+dpkg-deb -x linux-headers-4.15.0-101-generic_4.15.0-101.102_amd64.deb kernel-4.15.0-101
+```
+
+   The tree is `kernel-4.15.0-101/usr/src/linux-headers-4.15.0-101-generic`.
+   It carries real `objtool`, `modpost` and `include/generated`, and its own
+   `Module.symvers`.
+
+3. Build one subsystem at a time against it. A bare `make` fails on 4.15 for a
+   reason in that kernel's own build system (a `KBUILD_MODNAME` conflict in a
+   file the subsystems share):
+
+```bash
+KTREE="$PWD/kernel-4.15.0-101/usr/src/linux-headers-4.15.0-101-generic"
+make BOARD_NAME=EPC-WHL KERNEL_SOURCE="$KTREE" watchdog
+make BOARD_NAME=EPC-WHL KERNEL_SOURCE="$KTREE" gpio
+make BOARD_NAME=EPC-WHL KERNEL_SOURCE="$KTREE" hwmon
+```
+
+   Run `make misc` as well for a board that declares the misc subsystem, such
+   as `ESM-KX60G`. Each build leaves one `.ko`, and `modinfo -F vermagic` on
+   it reads `4.15.0-101-generic SMP mod_unload`.
+
 ---
 
 ## Board Configuration
@@ -134,6 +175,8 @@ The build system dynamically selects the target board configuration. It prioriti
 Configuration files are located in `configs/boards/`.
 
 Each board has its own file. If yours is missing, create it at `configs/boards/<BOARD_NAME>.conf`; `scripts/config.sh` then turns it into `src/configs/board.h`, which the build includes.
+
+A product that carries another board's hardware under its own DMI name -- a box PC built on an SBC, such as `EPC-TWL` on `ECM-TWL` -- has a short file that sets `CONFIG_BOARD_BASE` to that board; the build reads the base board's file for everything the short file does not set. `configs/README.md` describes it.
 
 ### Checking Your Board Name
 
@@ -194,7 +237,7 @@ make misc
 
 ### 4. Debug Mode
 
-To build the Watchdog driver with debug symbols and extra logging enabled:
+To build a driver with debug symbols and extra logging enabled, use its debug target:
 
 * **Watchdog:**
 ```bash
@@ -245,14 +288,12 @@ This command will:
 3. Remove the auto-load configuration from `/etc/modules-load.d/`.
 4. Update the module dependency map (`depmod`).
 
-
 ---
 
 #### Contact
 
 Please feel free to report any questions or issues to the support team.
 
-**Copyright © Avalue Technology Co., Ltd. All Rights Reserved.**  
-
+**Copyright © Avalue Technology Co., Ltd. All Rights Reserved.**
 
 You are welcome to give us suggestions for this website. Please email Technical@avalue.com or github_ae@avalue.com with your suggestions.

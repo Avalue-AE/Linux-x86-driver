@@ -5,9 +5,8 @@
 # machine actually presents, writes a Markdown test report, and ends on one
 # verdict: RELEASE when every executed check passed, DEBUG when any did not.
 #
-# It discovers what to test from the running system rather than from a board
-# configuration file, so it ships with the driver and a customer can run it on
-# the board in front of them. What it finds IS the expectation: the hwmon
+# It builds modules from the DMI board configuration, then discovers channels
+# to test from the running system. What it finds IS the expectation: the hwmon
 # device the driver registered, the channels it published, the gpiochip it
 # added, the watchdog it registered.
 #
@@ -24,10 +23,10 @@
 # Last means a reset costs nothing already measured, and the report is written
 # to disk before the device is opened.
 #
-# A driver this board carries but has not loaded is loaded with modprobe rather
-# than skipped: "not loaded" and "this board has no such subsystem" look
-# identical from /sys/module, and reporting both as a skip is how a real fault
-# hides inside a RELEASE verdict.
+# A driver this board carries but has not loaded is inserted from this run's
+# build or loaded with modprobe. "Not loaded" and "this board has no such
+# subsystem" look identical from /sys/module; reporting both as a skip is how
+# a real fault hides inside a RELEASE verdict.
 #
 # Usage:
 #   sudo ./test/board-acceptance.sh [options]
@@ -38,7 +37,8 @@
 #                     arm that resets a board whose nowayout is set
 #   --report <path>   where to write the report
 #                     (default: ./avalue-acceptance-<board>-<timestamp>.md)
-#   --no-install      do not install missing dependencies, skip what needs them
+#   --no-install      leave missing dependencies for the operator to install
+#   --no-build        use existing modules without compiling them
 #   -h, --help        this message
 #
 # Exit status: 0 = RELEASE, 1 = DEBUG, 2 = could not run.
@@ -55,6 +55,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPORT=""
 DO_INSTALL=1
 DO_LOAD=1
+DO_BUILD=1
 
 # What the three hardware-touching checks were answered. Set from the questions
 # below, never from the command line: an answer belongs to the run that gave it.
@@ -92,9 +93,9 @@ Usage:
                       the one that accepts a watchdog arm resetting this board
   --report <path>     where to write the report
                       (default: ./avalue-acceptance-<board>-<timestamp>.md)
-  --no-install        do not install missing dependencies, skip what needs them
-  --no-load           do not modprobe a driver this board carries but has not
-                      loaded; skip that subsystem instead
+  --no-install        leave missing dependencies for the operator to install
+  --no-build          use existing modules without compiling them
+  --no-load           leave unloaded drivers untested
   -h, --help          this message
 
 --all can reset this board. Arming a watchdog whose nowayout is set cannot be
@@ -125,6 +126,7 @@ while [ $# -gt 0 ]; do
 		shift 2
 		;;
 	--no-install)      DO_INSTALL=0; shift ;;
+	--no-build)        DO_BUILD=0; shift ;;
 	--no-load)         DO_LOAD=0; shift ;;
 	--dry-run)         SAW_DRY_RUN=1; shift ;;
 	--all)             SAW_ALL=1; shift ;;
@@ -168,6 +170,9 @@ RESULTS=()
 FAIL_COUNT=0
 PASS_COUNT=0
 SKIP_COUNT=0
+GPIO_VALUE_DETAIL=""
+GPIO_MAP_DETAIL=""
+GPIO_LOOPBACK_DETAIL=""
 
 record() {
 	# args: status, area, what, observed
@@ -250,7 +255,15 @@ check() {
 # Reads a sysfs file, printing its contents on one line, or the empty string.
 read1() {
 	[ -r "$1" ] || return 1
-	tr -d '\n' < "$1"
+	{ tr -d '\n' < "$1"; } 2>/dev/null
+}
+
+has_read_bit() {
+	# Root can pass a shell -r test on a write-only file. Inspect the mode
+	# exported by sysfs instead of whether this process can open the path.
+	local mode
+	mode=$(stat -L -c %A "$1" 2>/dev/null) || return 1
+	[[ "$mode" == *r* ]]
 }
 
 # ----------------------------------------------------------- dependencies ---
@@ -391,6 +404,84 @@ fi
 
 detect_pkg_manager
 record INFO "deps" "package manager" "${PKG_MANAGER:-none found}"
+
+# Build for the DMI board before loading. Fixture runs provide their own .ko
+# files and must never invoke a compiler or package manager on the host.
+BUILD_BOARD="${BOARD_NAME%%(*}"
+BUILD_DIR="$REPO_ROOT"
+BUILD_OK=1
+[ -n "$SYSROOT" ] && BUILD_DIR="$SYSROOT/build"
+BOARD_CONF="$REPO_ROOT/configs/boards/$BUILD_BOARD.conf"
+[ -n "$SYSROOT" ] && BOARD_CONF="$SYSROOT/configs/boards/$BUILD_BOARD.conf"
+# The board file as the build reads it. A board that sets CONFIG_BOARD_BASE
+# keeps its MAKE_* keys and most settings in its base board's file, so its
+# own file alone would read every subsystem and setting as absent.
+BOARD_VIEW=""
+if [ -f "$BOARD_CONF" ] && ! BOARD_VIEW=$(bash "$REPO_ROOT/scripts/config.sh" --merged "$BOARD_CONF"); then
+	record FAIL "build" "board file is readable" "scripts/config.sh could not read $BOARD_CONF; run bash scripts/config.sh --merged $BOARD_CONF to see why"
+	BOARD_VIEW=""
+fi
+PWM_READBACK_EXPECTED=0
+if grep -Eq '^CONFIG_HWM_PWM_WRITE_ONLY=0$' <<< "$BOARD_VIEW"; then
+	PWM_READBACK_EXPECTED=1
+fi
+
+ensure_build_dependencies() {
+	local packages="" kernel_dir="/lib/modules/$KERNEL_RELEASE/build"
+	if command -v make >/dev/null 2>&1 && command -v gcc >/dev/null 2>&1 && [ -d "$kernel_dir" ]; then
+		return 0
+	fi
+	if [ "$DO_INSTALL" -eq 0 ]; then
+		record FAIL "build" "build dependencies" "make, gcc or headers for $KERNEL_RELEASE are missing and --no-install was given"
+		return 1
+	fi
+	case "$PKG_MANAGER" in
+	apt-get) packages="build-essential linux-headers-$KERNEL_RELEASE"; apt-get update >/dev/null 2>&1 ;;
+	dnf|yum|zypper) packages="gcc make kernel-devel-$KERNEL_RELEASE" ;;
+	pacman) packages="base-devel linux-headers" ;;
+	*) record FAIL "build" "build dependencies" "make, gcc or kernel headers are missing and no supported package manager was found"; return 1 ;;
+	esac
+	echo "installing build dependencies for kernel $KERNEL_RELEASE with $PKG_MANAGER..."
+	if ! $INSTALL_CMD $packages >/dev/null 2>&1; then
+		record FAIL "build" "build dependencies" "package installation failed for $KERNEL_RELEASE"
+		return 1
+	fi
+	if ! command -v make >/dev/null 2>&1 || ! command -v gcc >/dev/null 2>&1 || [ ! -d "$kernel_dir" ]; then
+		record FAIL "build" "build dependencies" "packages installed but make, gcc or matching kernel headers are still missing"
+		return 1
+	fi
+	INSTALLED_PKGS="${INSTALLED_PKGS:+$INSTALLED_PKGS, }$packages"
+	record PASS "build" "build dependencies" "make, gcc and headers for $KERNEL_RELEASE are available"
+}
+
+if [ -z "$SYSROOT" ] && [ "$DO_BUILD" -eq 1 ]; then
+	BUILD_OK=0
+	if [ ! -f "$REPO_ROOT/configs/boards/$BUILD_BOARD.conf" ]; then
+		record FAIL "build" "board configuration" "no configuration for DMI board '$BUILD_BOARD' is present in this tree"
+	elif ensure_build_dependencies; then
+		echo "building Avalue modules for $BUILD_BOARD and kernel $KERNEL_RELEASE..."
+		if make -C "$REPO_ROOT" BOARD_NAME="$BUILD_BOARD" clean >/dev/null 2>&1 &&
+			make -C "$REPO_ROOT" BOARD_NAME="$BUILD_BOARD" modules >/dev/null 2>&1; then
+			BUILD_OK=1
+			record PASS "build" "board modules compile" "built for $BUILD_BOARD on $KERNEL_RELEASE"
+		else
+			record FAIL "build" "board modules compile" "build failed for $BUILD_BOARD on $KERNEL_RELEASE; run make BOARD_NAME=$BUILD_BOARD to inspect compiler diagnostics"
+		fi
+	fi
+fi
+
+# A successful kernel build can still omit a subsystem if its configuration is
+# incomplete. Treat every configured device as an expected build artifact.
+if [ -z "$SYSROOT" ] && [ "$DO_BUILD" -eq 1 ] && [ "$BUILD_OK" -eq 1 ]; then
+	for spec in 'MAKE_WDT_DEVICE:wdt' 'MAKE_HWM_DEVICE:hwm' 'MAKE_GPIO_DEVICE:gpio' 'MAKE_MISC_DEVICE:misc'; do
+		key="${spec%%:*}"
+		module="${spec#*:}"
+		if grep -Eq "^$key=[^[:space:]]" <<< "$BOARD_VIEW" && [ ! -f "$BUILD_DIR/$module.ko" ]; then
+			record FAIL "build" "$module module is produced" "board configuration enables $module, but $module.ko was not built"
+			BUILD_OK=0
+		fi
+	done
+fi
 # --------------------------------------------------------------- modules ---
 # A subsystem this board does not build and a subsystem whose module simply is
 # not loaded look identical from /sys/module, and reporting both as a skip is
@@ -406,19 +497,35 @@ ABSENT_MODULES=""
 # with no modprobe of its own carries no drivers at all.
 MODPROBE="modprobe"
 MODINFO="modinfo"
-# Where a locally built <module>.ko would sit. Normally the repository this
-# script was run from; under a fixture, a scratch dir the self-test fills.
-BUILD_DIR="$REPO_ROOT"
+INSMOD="insmod"
 if [ -n "$SYSROOT" ]; then
 	MODPROBE="$SYSROOT/bin/modprobe"
 	MODINFO="$SYSROOT/bin/modinfo"
-	BUILD_DIR="$SYSROOT/build"
+	INSMOD="$SYSROOT/bin/insmod"
 fi
 
 module_available() {
 	# args: module name. True when this board carries the module at all.
 	[ -n "$SYSROOT" ] && [ ! -x "$MODPROBE" ] && return 1
 	"$MODPROBE" --dry-run "$1" >/dev/null 2>&1
+}
+
+load_module_dependencies() {
+	# args: built .ko, module name. modinfo names kernel dependencies while
+	# insmod itself does not load them.
+	local dep deps old_ifs="$IFS"
+	deps=$("$MODINFO" -F depends "$1" 2>/dev/null) || deps=""
+	IFS=,
+	for dep in $deps; do
+		[ -n "$dep" ] || continue
+		if ! "$MODPROBE" "$dep" >/dev/null 2>&1; then
+			IFS="$old_ifs"
+			record FAIL "modules" "$2 dependencies load" "kernel dependency '$dep' could not be loaded"
+			return 1
+		fi
+	done
+	IFS="$old_ifs"
+	return 0
 }
 
 # hwm, gpio, wdt and misc are generic enough that something else could answer
@@ -522,7 +629,7 @@ confirm_module_identity() {
 
 ensure_module() {
 	# args: module name. Returns 0 when the module is loaded and usable.
-	local m="$1" err
+	local m="$1" err key="" built="$BUILD_DIR/$1.ko"
 
 	if [ -d "$SYSROOT/sys/module/$m" ]; then
 		# A resident module that turns out not to be ours leaves this
@@ -539,6 +646,59 @@ ensure_module() {
 		return 0
 	fi
 
+	if [ -z "$SYSROOT" ] && [ "$DO_BUILD" -eq 1 ] && [ "$BUILD_OK" -eq 1 ]; then
+		case "$m" in
+		hwm) key=MAKE_HWM_DEVICE ;;
+		gpio) key=MAKE_GPIO_DEVICE ;;
+		misc) key=MAKE_MISC_DEVICE ;;
+		wdt) key=MAKE_WDT_DEVICE ;;
+		esac
+		if [ -n "$key" ] && ! grep -Eq "^$key=[^[:space:]]" <<< "$BOARD_VIEW"; then
+			record SKIP "modules" "$m is configured" "the $BUILD_BOARD configuration does not enable this subsystem"
+			ABSENT_MODULES="${ABSENT_MODULES:+$ABSENT_MODULES }$m"
+			return 1
+		fi
+	fi
+
+	if [ "$BUILD_OK" -eq 0 ]; then
+		record SKIP "modules" "$m loads" "the board build did not complete, so this run cannot load a module from it"
+		ABSENT_MODULES="${ABSENT_MODULES:+$ABSENT_MODULES }$m"
+		return 1
+	fi
+
+	if [ "$DO_LOAD" -eq 0 ]; then
+		record SKIP "modules" "$m loads" "module is not resident and --no-load was given"
+		ABSENT_MODULES="${ABSENT_MODULES:+$ABSENT_MODULES }$m"
+		return 1
+	fi
+
+	# A .ko from this run is unambiguous. modprobe gpio may otherwise select
+	# the kernel's GPIO NAND driver before the Avalue module.
+	if [ -f "$built" ]; then
+		if ! load_module_dependencies "$built" "$m"; then
+			ABSENT_MODULES="${ABSENT_MODULES:+$ABSENT_MODULES }$m"
+			return 1
+		fi
+		echo "loading the $m driver from $built..."
+		if err=$("$INSMOD" "$built" 2>&1); then
+			if confirm_module_identity "$m"; then
+				record PASS "modules" "$m loads" "the Avalue $m driver was inserted from $built"
+				LOADED_MODULES="${LOADED_MODULES:+$LOADED_MODULES }$m"
+				return 0
+			fi
+			if "$MODPROBE" -r "$m" >/dev/null 2>&1; then
+				record INFO "modules" "$m removed again" "inserted module could not be confirmed and was unloaded"
+			else
+				record FAIL "modules" "$m removed again" "inserted module could not be confirmed or unloaded"
+			fi
+			ABSENT_MODULES="${ABSENT_MODULES:+$ABSENT_MODULES }$m"
+			return 1
+		fi
+		record FAIL "modules" "$m loads" "insertion from $built failed: ${err:-no message}"
+		ABSENT_MODULES="${ABSENT_MODULES:+$ABSENT_MODULES }$m"
+		return 1
+	fi
+
 	if ! module_available "$m"; then
 		# What was actually observed is narrower than "this board has no such
 		# subsystem": modprobe resolves against the INSTALLED modules, so all
@@ -547,17 +707,7 @@ ensure_module() {
 		# in exactly this branch, and calling that "not carried" would hide
 		# the very gap this test exists to find. So report the observation,
 		# and record it as a skip -- missing coverage -- not as information.
-		if [ -f "$REPO_ROOT/$m.ko" ]; then
-			record SKIP "modules" "$m is available to load" "$m.ko is built in $REPO_ROOT but not installed -- run 'sudo make install' so this subsystem can be tested"
-		else
-			record SKIP "modules" "$m is available to load" "no $m module is installed on this machine, so modprobe cannot resolve it -- this board may not build $m, or it may not have been installed"
-		fi
-		ABSENT_MODULES="${ABSENT_MODULES:+$ABSENT_MODULES }$m"
-		return 1
-	fi
-
-	if [ "$DO_LOAD" -eq 0 ]; then
-		record SKIP "modules" "$m is loaded" "this board carries $m but it is not loaded, and --no-load was given"
+		record SKIP "modules" "$m is available to load" "no $m module is installed on this machine, so modprobe cannot resolve it -- this board may not build $m, or it may not have been installed"
 		ABSENT_MODULES="${ABSENT_MODULES:+$ABSENT_MODULES }$m"
 		return 1
 	fi
@@ -681,6 +831,14 @@ else
 			*_label|*_alarm|*_min|*_max|*_crit) continue ;;  # unchecked-ok: a case-pattern alternation, not a pipeline
 			esac
 			found=$((found + 1))
+			if [ "$kind" = "pwm" ] && ! has_read_bit "$f"; then
+				if [ "$PWM_READBACK_EXPECTED" -eq 1 ]; then
+					record FAIL "hwm" "$base duty read-back matches board configuration" "the board enables PWM read-back, but the resident hwm exposes a write-only channel; unload the old hwm module and rerun this test"
+				else
+					record SKIP "hwm" "$base duty read-back" "the PWM channel is write-only; no current duty can be read or restored after a write"
+				fi
+				continue
+			fi
 			if ! raw=$(read1 "$f"); then
 				record FAIL "hwm" "$base is readable" "read failed"
 				continue
@@ -759,15 +917,15 @@ else
 		record SKIP "hwm" "PWM write and read-back" "not run -- the PWM write question was answered no, so no duty was written"
 	elif [ -z "$PWM_FAN_FILE" ]; then
 		record SKIP "hwm" "PWM write and read-back" "no PWM channel is labelled as a fan on this board"
+	elif ! has_read_bit "$PWM_FAN_FILE"; then
+		record SKIP "hwm" "PWM write and read-back" "the fan PWM is write-only, so its current duty cannot be restored safely"
+	elif ! orig=$(read1 "$PWM_FAN_FILE"); then
+		record FAIL "hwm" "$PWM_FAN_LABEL current duty is readable" "read failed; no duty was written because the original value cannot be restored"
+	elif ! is_int "$orig"; then
+		record FAIL "hwm" "$PWM_FAN_LABEL current duty is readable" "got '$orig', not a number; no duty was written because the original value cannot be restored"
 	else
-		orig=$(read1 "$PWM_FAN_FILE")
 		target=60
-		if is_int "$orig"; then
-			[ "$orig" -ge 55 ] && [ "$orig" -le 65 ] && target=40
-		else
-			record FAIL "hwm" "$PWM_FAN_LABEL current duty is readable" "reads '$orig', not a number -- restoring it after the write is not possible"
-			orig=""
-		fi
+		[ "$orig" -ge 55 ] && [ "$orig" -le 65 ] && target=40
 
 		fan_before=""
 		for f in "$HWMON_DIR"/fan[0-9]*_input; do
@@ -830,9 +988,7 @@ else
 				record SKIP "hwm" "fan speed follows duty" "no fan tachometer channel on this board"
 			fi
 
-			if [ -z "$orig" ]; then
-				record FAIL "hwm" "$PWM_FAN_LABEL restored" "the original duty was never readable, so the channel is left at ${target}%"
-			elif printf '%s' "$orig" > "$PWM_FAN_FILE" 2>/dev/null; then
+			if printf '%s' "$orig" > "$PWM_FAN_FILE" 2>/dev/null; then
 				record INFO "hwm" "$PWM_FAN_LABEL restored" "back to ${orig}%"
 			else
 				record FAIL "hwm" "$PWM_FAN_LABEL restored" "could not write the original ${orig}% back -- the channel is left at ${target}%"
@@ -887,29 +1043,71 @@ else
 				record FAIL "gpio" "the line count is even" "$GPIO_LINES lines cannot be paired for a loopback test"
 			fi
 
-			# Read every line, and name the ones that refuse rather than only
-			# counting them -- a single stuck line is what this finds.
+			# Read every line. Keep per-line readings in the report while the
+			# terminal shows the number of high and low lines.
 			unreadable=""
-			gpio_values=""
+			gpio_high=0
+			gpio_low=0
+			gpio_unavailable=0
 			for ((i = 0; i < GPIO_LINES; i++)); do
 				if v=$(gpioget "$GPIO_CHIP" "$i" 2>/dev/null); then
-					gpio_values="${gpio_values:+$gpio_values }$i=$v"
+					case "$v" in
+					0)
+						gpio_low=$((gpio_low + 1))
+						gpio_level="0 (low)"
+						;;
+					1)
+						gpio_high=$((gpio_high + 1))
+						gpio_level="1 (high)"
+						;;
+					*)
+						unreadable="${unreadable:+$unreadable }$i"
+						gpio_unavailable=$((gpio_unavailable + 1))
+						gpio_level="invalid reading"
+						;;
+					esac
 				else
 					unreadable="${unreadable:+$unreadable }$i"
+					gpio_unavailable=$((gpio_unavailable + 1))
+					gpio_level="unreadable"
 				fi
+				if [ -n "$GPIO_VALUE_DETAIL" ]; then
+					GPIO_VALUE_DETAIL+=$'\n'
+				fi
+				GPIO_VALUE_DETAIL+="line $i: $gpio_level"
 			done
 			if [ -z "$unreadable" ]; then
 				record PASS "gpio" "every line reads back" "all $GPIO_LINES lines readable"
 			else
-				record FAIL "gpio" "every line reads back" "line(s) $unreadable refused a read"
+				record FAIL "gpio" "every line reads back" "line(s) $unreadable did not return a 0/1 reading"
 			fi
-			record INFO "gpio" "line values at rest" "${gpio_values:-none read}"
+			record INFO "gpio" "line values at rest" "$gpio_high high, $gpio_low low, $gpio_unavailable unavailable (per-line readings in report)"
 
-			# The pin map belongs in the report: a loopback failure is read
-			# against it, and it says which line is which on this board.
+			# Record one compact line here and keep the per-line state in a
+			# separate report block. gpioinfo may contain arbitrary line names;
+			# the detail block selects only offsets, direction and polarity.
+			# These directions follow the gpioget sweep, which requested inputs;
+			# they do not establish any fixed hardware direction.
 			if command -v gpioinfo >/dev/null 2>&1; then
-				gpio_map=$(gpioinfo "$GPIO_CHIP" 2>/dev/null | tr '\n' ';' | tr -s ' ')  # unchecked-ok: informational only -- an empty map records as "unavailable" on the next line
-				record INFO "gpio" "line map" "${gpio_map:-gpioinfo returned nothing}"
+				gpio_map=$(gpioinfo "$GPIO_CHIP" 2>/dev/null)  # unchecked-ok: informational only -- an empty map is named below
+				GPIO_MAP_DETAIL=$(printf '%s\n' "$gpio_map" | awk '  # unchecked-ok: printf of an already-captured variable cannot fail; the awk program unconditionally reformats matching lines, and an empty/short result is named explicitly below ("gpioinfo returned no parseable line state") rather than read as success
+					$1 == "line" && $2 ~ /^[0-9]+:$/ {
+						n = $2; sub(/:$/, "", n)
+						direction = "unknown"
+						if ($0 ~ /[[:space:]]input[[:space:]]/) direction = "input"
+						else if ($0 ~ /[[:space:]]output[[:space:]]/) direction = "output"
+						polarity = "unknown"
+						if ($0 ~ /active-high/) polarity = "active-high"
+						else if ($0 ~ /active-low/) polarity = "active-low"
+						print "line " n ": " direction " " polarity
+					}')
+				if [ -n "$GPIO_MAP_DETAIL" ]; then
+					gpio_inputs=$(printf '%s\n' "$GPIO_MAP_DETAIL" | awk '/: input / { n++ } END { print n+0 }')  # unchecked-ok: printf of an already-captured variable cannot fail; the awk program always completes and its END block always prints a count (0 when nothing matched), so a parse failure reads as an accurate "0 inputs", not a hidden pass
+					gpio_outputs=$(printf '%s\n' "$GPIO_MAP_DETAIL" | awk '/: output / { n++ } END { print n+0 }')  # unchecked-ok: printf of an already-captured variable cannot fail; the awk program always completes and its END block always prints a count (0 when nothing matched), so a parse failure reads as an accurate "0 outputs", not a hidden pass
+					record INFO "gpio" "line state after reads" "$GPIO_CHIP: $GPIO_LINES lines; $gpio_inputs inputs, $gpio_outputs outputs (per-line map in report)"
+				else
+					record INFO "gpio" "line state after reads" "$GPIO_CHIP: gpioinfo returned no parseable line state"
+				fi
 			fi
 		fi
 
@@ -924,33 +1122,23 @@ else
 			record SKIP "gpio" "loopback drive test" "test/test-gpio.sh is not in this tree"
 		else
 			# Keep the failing pair, not just the failure: test-gpio.sh names
-			# the pin it could not drive, and that line is the whole finding.
+			# the non-following paths without assigning a physical cause.
 			gpio_out=$(bash "$REPO_ROOT/test/test-gpio.sh" 2>&1)
 			gpio_rc=$?
+			GPIO_LOOPBACK_DETAIL=$(printf '%s\n' "$gpio_out" | grep -E '^Using gpioset hold:|^Testing GPIO line pair:|^Error:')  # unchecked-ok: an empty selection is called out in the report
+			gpio_passed=$(printf '%s\n' "$GPIO_LOOPBACK_DETAIL" | awk '/^Testing GPIO line pair: .* PASSED$/ { n++ } END { print n+0 }')  # unchecked-ok: printf of an already-captured variable cannot fail; the awk program always completes and its END block always prints a count (0 when nothing matched); this is only read inside the gpio_rc -eq 0 branch, so a parse failure reads as a suspiciously low "0/$GPIO_LINES passed" rather than a hidden pass
+			gpio_failed=$(printf '%s\n' "$GPIO_LOOPBACK_DETAIL" | sed -nE 's/^Testing GPIO line pair: output=([0-9]+) <--> input=([0-9]+) \.\.\. FAILED.*/\1->\2/p' | awk '{ printf "%s%s", sep, $0; sep=", " } END { if (NR) print "" }')  # unchecked-ok: empty means the test failed before naming a pair
 			if [ "$gpio_rc" -eq 0 ]; then
-				record PASS "gpio" "loopback drive test" "every line pair drove and read both values"
+				record PASS "gpio" "loopback drive test" "$gpio_passed/$GPIO_LINES directed tests passed"
 			elif [ "$gpio_rc" -eq 2 ]; then
-				# Not one pair followed, in either direction. Naming a single
-				# failing pair here would report the first symptom as though it
-				# were the finding; the pattern across ALL of them is the
-				# finding, and it narrows to one of two things. The operator
-				# supplied the one this test cannot measure when they answered
-				# the wiring question, so say what their answer implies rather
-				# than leaving the reader to work it out.
-				record FAIL "gpio" "loopback drive test" "no line pair responded, in either direction -- with the loopback wiring fitted, as the question above was answered, that leaves the driver's output path not reaching the pins; if the wiring is in fact absent, that is the explanation instead and this run cannot tell which"
+				# No pair followed. Input reads cannot separate missing jumpers,
+				# a wrong pin map, or outputs that never drove the physical pins.
+				record FAIL "gpio" "loopback drive test" "0/$GPIO_LINES directed tests passed; no pair followed -- check loopback jumpers, pin mapping, and output signals (details in report)"
 			else
-				gpio_why=$(printf '%s' "$gpio_out" | grep -iE 'mismatch|error|fail' | head -1)  # unchecked-ok: an empty extraction falls back to the generic message on the next line
-				record FAIL "gpio" "loopback drive test" "${gpio_why:-test/test-gpio.sh failed; run it directly for the failing pair}"
+				record FAIL "gpio" "loopback drive test" "$gpio_passed/$GPIO_LINES directed tests passed; failed ${gpio_failed:-before pair results (see report)}"
 			fi
 
-			if [ "$gpio_rc" -ne 0 ]; then
-				# Which pairs passed, which failed, and what each one actually
-				# read is the whole basis for the verdict above -- and the hold
-				# mode the loopback test reports rules out a third explanation
-				# that used to look identical. Keeping only a one-line summary
-				# leaves the reader unable to check any of it.
-				record INFO "gpio" "what the loopback test reported" "$(printf '%s' "$gpio_out" | tr '\n' ';')"  # unchecked-ok: reformats already-captured output for one report cell; the capture above is what this reports on
-			fi
+			record INFO "gpio" "loopback details" "per-pair readings and test verdict are in the GPIO details section of the report"
 
 			# Which libgpiod is installed decides whether gpioset holds a line
 			# while it is read, so it belongs in the report on a pass as well --
@@ -1070,6 +1258,34 @@ write_report() {
 			echo "| $st | $area | $what | $observed |"
 		done
 		echo
+		if [ -n "$GPIO_VALUE_DETAIL" ] || [ -n "$GPIO_MAP_DETAIL" ] || [ -n "$GPIO_LOOPBACK_DETAIL" ]; then
+			echo "## GPIO details"
+			echo
+			if [ -n "$GPIO_VALUE_DETAIL" ]; then
+				echo "Line values before the loopback drive:"
+				echo
+				echo '```text'
+				printf '%s\n' "$GPIO_VALUE_DETAIL"
+				echo '```'
+				echo
+			fi
+			if [ -n "$GPIO_MAP_DETAIL" ]; then
+				echo "Line direction and polarity after the input-read sweep:"
+				echo
+				echo '```text'
+				printf '%s\n' "$GPIO_MAP_DETAIL"
+				echo '```'
+				echo
+			fi
+			if [ -n "$GPIO_LOOPBACK_DETAIL" ]; then
+				echo "GPIO loopback observations:"
+				echo
+				echo '```text'
+				printf '%s\n' "$GPIO_LOOPBACK_DETAIL"
+				echo '```'
+				echo
+			fi
+		fi
 		echo "## Reading this report"
 		echo
 		echo "- **PASS** — the check ran against the hardware and held."
@@ -1077,9 +1293,9 @@ write_report() {
 		echo "- **SKIP** — the check did not run. The observed column says what would let it."
 		echo "- **INFO** — a reading recorded for the record; it does not move the verdict."
 		echo
-		echo "The watchdog is never armed by this test: opening \`/dev/watchdog\` starts the"
-		echo "timer, and with \`nowayout\` set nothing short of a reset stops it. Everything"
-		echo "reported about it comes from sysfs."
+		echo "The watchdog runs last. When arming was approved, opening \`/dev/watchdog\`"
+		echo "starts the timer; with \`nowayout\` set, a reset is needed to stop it."
+		echo "The watchdog section records sysfs readings and the approved arm test."
 		[ -n "${1:-}" ] && printf '%s\n' "" "$1"
 	} > "$REPORT"
 }

@@ -416,9 +416,15 @@ static struct attribute_group __hwm_fan_group = {
  * Fixed sensor device attribute for PWM
  */
 
+#if CONFIG_HWM_PWM_WRITE_ONLY
+#define HWM_PWM_MODE 0200
+#else
+#define HWM_PWM_MODE 0644
+#endif
+
 // ===== PWM 0 =====
 #if CONFIG_HWM_PWM_0_ENABLE
-static SENSOR_DEVICE_ATTR_2(pwm1, 0644, __hwm_sensor_register_show,
+static SENSOR_DEVICE_ATTR_2(pwm1, HWM_PWM_MODE, __hwm_sensor_register_show,
 			    __hwm_sensor_register_store, HWM_SENSOR_INDEX_PWM,
 			    0);
 static SENSOR_DEVICE_ATTR_2(pwm1_label, 0644, __hwm_sensor_label_show, NULL,
@@ -427,7 +433,7 @@ static SENSOR_DEVICE_ATTR_2(pwm1_label, 0644, __hwm_sensor_label_show, NULL,
 
 // ===== PWM 1 =====
 #if CONFIG_HWM_PWM_1_ENABLE
-static SENSOR_DEVICE_ATTR_2(pwm2, 0644, __hwm_sensor_register_show,
+static SENSOR_DEVICE_ATTR_2(pwm2, HWM_PWM_MODE, __hwm_sensor_register_show,
 			    __hwm_sensor_register_store, HWM_SENSOR_INDEX_PWM,
 			    1);
 static SENSOR_DEVICE_ATTR_2(pwm2_label, 0644, __hwm_sensor_label_show, NULL,
@@ -436,7 +442,7 @@ static SENSOR_DEVICE_ATTR_2(pwm2_label, 0644, __hwm_sensor_label_show, NULL,
 
 // ===== PWM 2 =====
 #if CONFIG_HWM_PWM_2_ENABLE
-static SENSOR_DEVICE_ATTR_2(pwm3, 0644, __hwm_sensor_register_show,
+static SENSOR_DEVICE_ATTR_2(pwm3, HWM_PWM_MODE, __hwm_sensor_register_show,
 			    __hwm_sensor_register_store, HWM_SENSOR_INDEX_PWM,
 			    2);
 static SENSOR_DEVICE_ATTR_2(pwm3_label, 0644, __hwm_sensor_label_show, NULL,
@@ -445,7 +451,7 @@ static SENSOR_DEVICE_ATTR_2(pwm3_label, 0644, __hwm_sensor_label_show, NULL,
 
 // ===== PWM 3 =====
 #if CONFIG_HWM_PWM_3_ENABLE
-static SENSOR_DEVICE_ATTR_2(pwm4, 0644, __hwm_sensor_register_show,
+static SENSOR_DEVICE_ATTR_2(pwm4, HWM_PWM_MODE, __hwm_sensor_register_show,
 			    __hwm_sensor_register_store, HWM_SENSOR_INDEX_PWM,
 			    3);
 static SENSOR_DEVICE_ATTR_2(pwm4_label, 0644, __hwm_sensor_label_show, NULL,
@@ -454,7 +460,7 @@ static SENSOR_DEVICE_ATTR_2(pwm4_label, 0644, __hwm_sensor_label_show, NULL,
 
 // ===== PWM 4 =====
 #if CONFIG_HWM_PWM_4_ENABLE
-static SENSOR_DEVICE_ATTR_2(pwm5, 0644, __hwm_sensor_register_show,
+static SENSOR_DEVICE_ATTR_2(pwm5, HWM_PWM_MODE, __hwm_sensor_register_show,
 			    __hwm_sensor_register_store, HWM_SENSOR_INDEX_PWM,
 			    4);
 static SENSOR_DEVICE_ATTR_2(pwm5_label, 0644, __hwm_sensor_label_show, NULL,
@@ -463,7 +469,7 @@ static SENSOR_DEVICE_ATTR_2(pwm5_label, 0644, __hwm_sensor_label_show, NULL,
 
 // ===== PWM 5 =====
 #if CONFIG_HWM_PWM_5_ENABLE
-static SENSOR_DEVICE_ATTR_2(pwm6, 0644, __hwm_sensor_register_show,
+static SENSOR_DEVICE_ATTR_2(pwm6, HWM_PWM_MODE, __hwm_sensor_register_show,
 			    __hwm_sensor_register_store, HWM_SENSOR_INDEX_PWM,
 			    5);
 static SENSOR_DEVICE_ATTR_2(pwm6_label, 0644, __hwm_sensor_label_show, NULL,
@@ -472,7 +478,7 @@ static SENSOR_DEVICE_ATTR_2(pwm6_label, 0644, __hwm_sensor_label_show, NULL,
 
 // ===== PWM 6 =====
 #if CONFIG_HWM_PWM_6_ENABLE
-static SENSOR_DEVICE_ATTR_2(pwm7, 0644, __hwm_sensor_register_show,
+static SENSOR_DEVICE_ATTR_2(pwm7, HWM_PWM_MODE, __hwm_sensor_register_show,
 			    __hwm_sensor_register_store, HWM_SENSOR_INDEX_PWM,
 			    6);
 static SENSOR_DEVICE_ATTR_2(pwm7_label, 0644, __hwm_sensor_label_show, NULL,
@@ -634,31 +640,31 @@ static umode_t __hwm_is_visible(const void *data, enum hwmon_sensor_types type,
 			switch (channel) {
 #if CONFIG_HWM_PWM_0_ENABLE
 			case 0:
-				return 0644;
+				return HWM_PWM_MODE;
 #endif
 #if CONFIG_HWM_PWM_1_ENABLE
 			case 1:
-				return 0644;
+				return HWM_PWM_MODE;
 #endif
 #if CONFIG_HWM_PWM_2_ENABLE
 			case 2:
-				return 0644;
+				return HWM_PWM_MODE;
 #endif
 #if CONFIG_HWM_PWM_3_ENABLE
 			case 3:
-				return 0644;
+				return HWM_PWM_MODE;
 #endif
 #if CONFIG_HWM_PWM_4_ENABLE
 			case 4:
-				return 0644;
+				return HWM_PWM_MODE;
 #endif
 #if CONFIG_HWM_PWM_5_ENABLE
 			case 5:
-				return 0644;
+				return HWM_PWM_MODE;
 #endif
 #if CONFIG_HWM_PWM_6_ENABLE
 			case 6:
-				return 0644;
+				return HWM_PWM_MODE;
 #endif
 			}
 		}

@@ -279,6 +279,10 @@ s32 hal_hwm_pwm_read(struct hal_hwm_sensor *sensor)
 	if (sensor == NULL || sensor->type != HWM_SENSOR_TYPE_PWM)
 		return -EINVAL;
 
+#if CONFIG_HWM_PWM_WRITE_ONLY
+	return -EACCES;
+#endif
+
 	raw = ite_dev.ops->read8(sensor->reg);
 
 	/* Convert 0-255 to 0-100% */
